@@ -1,0 +1,23 @@
+# Changelog
+
+All notable changes to this plugin are documented here. Releases follow
+the repo-tag = version convention; each GitHub release ships the two
+assets `pihub-plugin.json` and the versioned tarball.
+
+## [1.0.1] - 2026-10-06
+
+### Changed
+- Removed setup-specific names and the example IP from the config
+  placeholder and docs; README, LICENSE and manifest follow the layout
+  of the other Pi Hub plugins.
+
+## [1.0.0] - 2026-10-06
+
+### Added
+- Power-draw badge (`42.5 W`) on every host card, read from a JSON URL
+  per host (smart plug, Home Assistant, the bundled host agent, …).
+- Optional GPU badge (`GPU 7.3 W`) from a second JSON path on the same URL.
+- Warn / bad thresholds that colour the badge; stale or failed readings
+  show a muted `— W` with the reason on hover.
+- Read-only host agent (`agent/`) for Linux hosts: Intel RAPL (CPU, DRAM,
+  integrated GPU), NVIDIA (`nvidia-smi`) and AMD (`amdgpu` hwmon).
