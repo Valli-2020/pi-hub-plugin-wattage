@@ -8,7 +8,8 @@ or the small host agent bundled in this repo.
 ## What it does
 
 - **Power badge** on each host card, updated every 15 s (configurable).
-  Hosts without a reading show nothing.
+  Hosts without a reading show nothing. Agent readings are labelled
+  `CPU 12.8 W`; with a base load set they show an estimate, `≈ 28 W`.
 - **Automatic detection**: every host that runs the bundled host agent is
   found on its own — no per-host setup.
 - **GPU badge**: shown when the host reports GPU power (NVIDIA, AMD, or an
@@ -35,6 +36,7 @@ or the small host agent bundled in this repo.
 | Setting | Meaning |
 |---|---|
 | Host agent port | Port the agent answers on (default `9871`); `1` switches detection off |
+| Base load (W) | What the rest of the machine draws on top of the CPU, per host: `host-id watts`, entries separated by `;` |
 | Extra sources | Other JSON sources: `host-id url json-path [gpu-path]`, entries separated by `;` |
 | Poll interval / Timeout | Seconds (interval applies after a reload) |
 | Warn / Bad above (W) | Badge colour limits; `0` = no colour change |
@@ -80,8 +82,9 @@ curl http://<bind-ip>:9871/            # {"package_w": 12.8, "cpu_w": 8.9, "gpu_
 
 ## Limitations
 
-- RAPL measures the CPU package, not wall power. For wall power use a
-  metered plug.
+- RAPL measures the CPU package, not wall power: board, disks, fans and PSU
+  losses are missing. Measure the real draw once with a metered plug and
+  enter the difference as *Base load*, or use the plug as an extra source.
 - A host that is off shows `— W` until it answers again.
 
 ## Development

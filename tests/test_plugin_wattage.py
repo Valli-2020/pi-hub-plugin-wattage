@@ -84,13 +84,17 @@ check("static schema, no host names", [f["name"] for f in p.get_config_schema()]
 ctx.cfg["agent_port"] = port
 p.poll_all()
 out = p.p_watts()
-check("agent auto-detected on hosts with an ip", set(out) == {"a", "b"} and out["a"]["text"] == "12.8 W", str(out))
+check("agent auto-detected on hosts with an ip", set(out) == {"a", "b"} and out["a"]["text"] == "CPU 12.8 W", str(out))
+ctx.cfg["base"] = "a 15; b x; junk"
+check("parse_base", w.parse_base("a 15; b x; c 2.5; junk") == {"a": 15.0, "c": 2.5})
+check("base load gives an estimate", p.p_watts()["a"]["text"] == "≈ 28 W" and p.p_watts()["b"]["text"] == "CPU 12.8 W", str(p.p_watts()))
+ctx.cfg["base"] = ""
 check("idle integrated gpu hidden", p.p_gpu() == {})
 
 ctx.cfg["extra"] = "a %s/x meters.0.power gpu_w; b %s/redir a" % (base, base)
 p.poll_all()
 out = p.p_watts()
-check("extra source overrides agent", out["a"]["text"] == "42.5 W", str(out))
+check("extra source overrides agent", out["a"]["text"] == "42.5 W", str(out))   # plug: real watts, no CPU label
 check("gpu badge", p.p_gpu()["a"]["text"] == "GPU 7.2 W" or p.p_gpu()["a"]["text"] == "GPU 7.3 W", str(p.p_gpu()))
 check("redirect refused", out["b"]["text"] == "— W" and out["b"]["tone"] == "muted", str(out))
 ctx.cfg["warn_w"] = 40

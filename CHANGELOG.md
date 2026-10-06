@@ -4,6 +4,16 @@ All notable changes to this plugin are documented here. Releases follow
 the repo-tag = version convention; each GitHub release ships the two
 assets `pihub-plugin.json` and the versioned tarball.
 
+## [1.2.0] - 2026-10-06
+
+### Added
+- **Base load** setting: per host, the watts the rest of the machine draws
+  on top of the CPU. The badge then shows an estimate (`≈ 28 W`).
+
+### Changed
+- Host-agent readings without a base load are labelled `CPU 12.8 W` with a
+  tooltip that they exclude board, disks, fans and PSU losses.
+
 ## [1.1.0] - 2026-10-06
 
 ### Changed

@@ -48,6 +48,19 @@ def extract(data: Any, path: str) -> float:
     return float(cur)
 
 
+def parse_base(text: str) -> dict[str, float]:
+    """``"id 15; id2 22.5"`` -> {id: watts}."""
+    out = {}
+    for entry in str(text or "").split(";"):
+        parts = entry.split()
+        if len(parts) == 2:
+            try:
+                out[parts[0]] = max(0.0, float(parts[1]))
+            except ValueError:
+                pass
+    return out
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a, **kw):
         return None
@@ -58,7 +71,7 @@ _opener = urllib.request.build_opener(_NoRedirect)
 
 class Wattage(Plugin):
     name = "wattage"
-    version = "1.1.0"
+    version = "1.2.0"
     description = "Current power draw (W) and GPU power on each host card"
     min_core_version = "8.0.0"
     plugin_api_version = 2
@@ -70,7 +83,7 @@ class Wattage(Plugin):
         self._data: dict[str, dict[str, Any]] = {}   # host id -> {w, gpu, ts, err}
         cfg = ctx.get_config()
         for k, v in (("interval", 15), ("timeout", 2), ("agent_port", 9871),
-                     ("warn_w", 0), ("bad_w", 0), ("extra", "")):
+                     ("warn_w", 0), ("bad_w", 0), ("extra", ""), ("base", "")):
             cfg.setdefault(k, v)
 
     def get_config_schema(self):
@@ -80,6 +93,11 @@ class Wattage(Plugin):
             {"name": "extra", "label": "Extra sources", "type": "text",
              "placeholder": "host-id http://<ip>/status meters.0.power; host-id2 http://<ip>/x path gpu-path",
              "help": "Other JSON sources: host id, URL, JSON path and optional GPU path, entries separated by ';'."},
+            {"name": "base", "label": "Base load (W)", "type": "text",
+             "placeholder": "host-id 15; host-id2 22",
+             "help": "Host agents only measure the CPU. Add what the rest of the machine draws "
+                     "(board, disks, fans, PSU losses; measure once with a plug) as 'host-id watts' entries "
+                     "separated by ';'. The badge then shows an estimate of the whole device."},
             {"name": "interval", "label": "Poll interval (s)", "type": "number", "min": 5, "max": 3600,
              "help": "Applies after the plugin is reloaded."},
             {"name": "timeout", "label": "Timeout (s)", "type": "number", "min": 0.5, "max": 10},
@@ -111,7 +129,7 @@ class Wattage(Plugin):
     def _poll_one(self, host_id: str, url: str, path: str, gpu_path: str, timeout: float, auto: bool) -> None:
         try:
             w, gpu = self._fetch(url, [path, gpu_path], timeout)
-            res = {"w": w, "gpu": gpu, "ts": time.time(), "err": ""}
+            res = {"w": w, "gpu": gpu, "ts": time.time(), "err": "", "cpu_only": auto}
         except Exception as e:
             if auto:                      # no agent on this host: not an error, just nothing to show
                 with self._lock:
@@ -169,16 +187,28 @@ class Wattage(Plugin):
 
     def p_watts(self, session=None):
         now, stale, snap = self._snapshot()
+        base = parse_base(self.ctx.get_config().get("base"))
         out = {}
         for hid, r in snap.items():
             age = now - r["ts"]
             if r["w"] is None or age > stale:
                 out[hid] = {"type": "badge", "text": "— W", "tone": "muted",
                             "title": r["err"] or "no recent reading"}
+                continue
+            w, cpu_only = r["w"], r.get("cpu_only")
+            fmt = "%.1f" if w < 100 else "%.0f"
+            if cpu_only and hid in base:
+                total = w + base[hid]
+                text = "≈ %.0f W" % total
+                title = "Estimate: CPU %.1f W + base load %.0f W, updated %d s ago" % (w, base[hid], age)
+                w = total
+            elif cpu_only:
+                text = ("CPU " + fmt + " W") % w
+                title = "CPU package only (RAPL): excludes board, disks, fans and PSU losses. Set a base load to estimate the whole device."
             else:
-                out[hid] = {"type": "badge", "text": "%.1f W" % r["w"] if r["w"] < 100 else "%.0f W" % r["w"],
-                            "tone": self._tone(r["w"]),
-                            "title": "Power draw, updated %d s ago" % age}
+                text = (fmt + " W") % w
+                title = "Power draw, updated %d s ago" % age
+            out[hid] = {"type": "badge", "text": text, "tone": self._tone(w), "title": title}
         return out
 
     def p_gpu(self, session=None):
