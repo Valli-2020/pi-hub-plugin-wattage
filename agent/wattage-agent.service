@@ -1,0 +1,15 @@
+[Unit]
+Description=wattage-agent (read-only power exporter for Pi Hub)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/wattage-agent.py --bind @BIND@ --port 9871
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+CapabilityBoundingSet=
+NoNewPrivileges=true
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
