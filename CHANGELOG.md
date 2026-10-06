@@ -4,6 +4,15 @@ All notable changes to this plugin are documented here. Releases follow
 the repo-tag = version convention; each GitHub release ships the two
 assets `pihub-plugin.json` and the versioned tarball.
 
+## [1.1.0] - 2026-10-06
+
+### Changed
+- **No per-host settings any more.** Hosts running the host agent are
+  detected automatically on a fixed port; other JSON sources go into one
+  *Extra sources* setting. The Configure form no longer lists host names.
+- The GPU badge only appears when the GPU reports at least 0.1 W, so idle
+  integrated GPUs stay quiet.
+
 ## [1.0.1] - 2026-10-06
 
 ### Changed

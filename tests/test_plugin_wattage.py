@@ -33,7 +33,10 @@ class H(http.server.BaseHTTPRequestHandler):
             self.send_header("Location", "file:///etc/passwd")
             self.end_headers()
             return
-        body = json.dumps({"meters": [{"power": 42.5}], "gpu_w": 7.25}).encode()
+        if self.path == "/":
+            body = json.dumps({"package_w": 12.8, "gpu_w": 0.0}).encode()
+        else:
+            body = json.dumps({"meters": [{"power": 42.5}], "gpu_w": 7.25}).encode()
         self.send_response(200)
         self.end_headers()
         self.wfile.write(body)
@@ -44,7 +47,8 @@ class H(http.server.BaseHTTPRequestHandler):
 
 srv = http.server.HTTPServer(("127.0.0.1", 0), H)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
-base = "http://127.0.0.1:%d" % srv.server_port
+port = srv.server_port
+base = "http://127.0.0.1:%d" % port
 
 
 class Ctx:
@@ -55,7 +59,7 @@ class Ctx:
         return self.cfg
 
     def get_hosts(self):
-        return [{"id": "nas-1", "name": "NAS"}, {"id": "pc", "name": "PC"}]
+        return [{"id": "a", "ip": "127.0.0.1"}, {"id": "b", "ip": "127.0.0.1"}, {"id": "c", "ip": ""}]
 
 
 print("extract")
@@ -67,31 +71,38 @@ for bad in (({"a": 1}, "b"), ({"a": True}, "a"), ({"a": [1]}, "a.5")):
     except (KeyError, IndexError, ValueError):
         check("bad path rejected %r" % (bad,), True)
 
+print("parse_extra")
+check("entries", w.parse_extra("a http://x p; b http://y q g") == {"a": ("http://x", "p", ""), "b": ("http://y", "q", "g")})
+check("junk ignored", w.parse_extra("a b; ;") == {})
+
 print("plugin")
 p = w.Wattage()
 ctx = Ctx()
 p.load(ctx)
-names = [f["name"] for f in p.get_config_schema()]
-check("schema fields sanitised", "url_nas_1" in names and "path_pc" in names, str(names))
+check("static schema, no host names", [f["name"] for f in p.get_config_schema()][:2] == ["agent_port", "extra"])
 
-ctx.cfg.update({"url_nas_1": base + "/x", "path_nas_1": "meters.0.power",
-                "url_pc": base + "/redir", "path_pc": "a"})
+ctx.cfg["agent_port"] = port
 p.poll_all()
 out = p.p_watts()
-check("good reading", out["nas-1"]["text"] == "42.5 W" and out["nas-1"]["tone"] == "info", str(out))
-check("redirect refused", out["pc"]["text"] == "— W" and out["pc"]["tone"] == "muted", str(out))
-check("gpu badge absent without path", "nas-1" not in p.p_gpu())
-ctx.cfg["gpu_path_nas_1"] = "gpu_w"
+check("agent auto-detected on hosts with an ip", set(out) == {"a", "b"} and out["a"]["text"] == "12.8 W", str(out))
+check("idle integrated gpu hidden", p.p_gpu() == {})
+
+ctx.cfg["extra"] = "a %s/x meters.0.power gpu_w; b %s/redir a" % (base, base)
 p.poll_all()
-check("gpu badge", p.p_gpu()["nas-1"]["text"] == "GPU 7.2 W" or p.p_gpu()["nas-1"]["text"] == "GPU 7.3 W", str(p.p_gpu()))
-ctx.cfg["gpu_path_nas_1"] = "nogpu"
-p.poll_all()
-check("missing gpu path tolerated", p.p_watts()["nas-1"]["text"] == "42.5 W" and "nas-1" not in p.p_gpu())
+out = p.p_watts()
+check("extra source overrides agent", out["a"]["text"] == "42.5 W", str(out))
+check("gpu badge", p.p_gpu()["a"]["text"] == "GPU 7.2 W" or p.p_gpu()["a"]["text"] == "GPU 7.3 W", str(p.p_gpu()))
+check("redirect refused", out["b"]["text"] == "— W" and out["b"]["tone"] == "muted", str(out))
 ctx.cfg["warn_w"] = 40
-check("warn tone", p.p_watts()["nas-1"]["tone"] == "warn")
-ctx.cfg["url_pc"] = ""
+check("warn tone", p.p_watts()["a"]["tone"] == "warn")
+
+ctx.cfg["extra"] = ""
+ctx.cfg["agent_port"] = 1 
 p.poll_all()
-check("unmonitored host dropped", "pc" not in p.p_watts())
+check("detection off drops everything", p.p_watts() == {})
+ctx.cfg["agent_port"] = port + 1
+p.poll_all()
+check("no agent = no badge", p.p_watts() == {})
 srv.shutdown()
 
 print("FAILED: %s" % FAILED if FAILED else "all passed")

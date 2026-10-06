@@ -8,14 +8,16 @@ or the small host agent bundled in this repo.
 ## What it does
 
 - **Power badge** on each host card, updated every 15 s (configurable).
-  Hosts without a URL show nothing.
-- **GPU badge** (optional): a second JSON path read from the same URL.
+  Hosts without a reading show nothing.
+- **Automatic detection**: every host that runs the bundled host agent is
+  found on its own — no per-host setup.
+- **GPU badge**: shown when the host reports GPU power (NVIDIA, AMD, or an
+  integrated GPU under load).
+- **Extra sources**: any other JSON endpoint (metered smart plug, Home
+  Assistant) can be added in one setting.
 - **Thresholds**: optional *warn* / *bad* watt limits change the badge
   colour. A failed or stale reading shows a muted `— W`; the reason is in
   the tooltip.
-- **Host agent** (`agent/`): a read-only, stdlib-only exporter for Linux
-  hosts serving CPU / DRAM watts (Intel RAPL), the integrated GPU (RAPL
-  uncore), NVIDIA cards (`nvidia-smi`) and AMD cards (`amdgpu` hwmon).
 
 ## Install
 
@@ -24,28 +26,29 @@ or the small host agent bundled in this repo.
    click **Scan**, then **Install** and **Enable**.
 3. Approve the permissions: `hosts.read` (list your hosts) and `ui.slots`
    (the badges on the host cards).
+4. Install the host agent on the machines you want to measure (below).
 
 ## Configuration
 
-**Settings → Plugins → wattage → Configure.** For every host:
+**Settings → Plugins → wattage → Configure.** No host list to fill in.
 
-| Field | Meaning |
+| Setting | Meaning |
 |---|---|
-| URL | Where to read the value. Empty = host not monitored |
-| JSON path | Dotted path to the watt value, e.g. `meters.0.power` (list indices allowed) |
-| GPU JSON path | Optional, same URL; adds the `GPU` badge |
+| Host agent port | Port the agent answers on (default `9871`); `1` switches detection off |
+| Extra sources | Other JSON sources: `host-id url json-path [gpu-path]`, entries separated by `;` |
+| Poll interval / Timeout | Seconds (interval applies after a reload) |
+| Warn / Bad above (W) | Badge colour limits; `0` = no colour change |
 
-Global: poll interval (5–3600 s, applied after a reload), timeout, warn /
-bad thresholds in watts (`0` = no colour change).
+Examples for *Extra sources* (the host id is the id of the card it belongs to):
 
-Examples:
+| Source | Entry |
+|---|---|
+| Shelly Gen1 | `myhost http://<device-ip>/status meters.0.power` |
+| Shelly Gen2 | `myhost http://<device-ip>/rpc/Switch.GetStatus?id=0 apower` |
+| Tasmota | `myhost http://<device-ip>/cm?cmnd=Status%2010 StatusSNS.ENERGY.Power` |
 
-| Source | URL | JSON path |
-|---|---|---|
-| Shelly Gen1 | `http://<device-ip>/status` | `meters.0.power` |
-| Shelly Gen2 | `http://<device-ip>/rpc/Switch.GetStatus?id=0` | `apower` |
-| Tasmota | `http://<device-ip>/cm?cmnd=Status%2010` | `StatusSNS.ENERGY.Power` |
-| Host agent | `http://<host-ip>:9871/` | `package_w` (GPU: `gpu_w`) |
+An extra source wins over the agent for the same host. The JSON path is
+dotted, list indices allowed.
 
 ## Host agent
 
@@ -70,9 +73,10 @@ curl http://<bind-ip>:9871/            # {"package_w": 12.8, "cpu_w": 8.9, "gpu_
 
 - Only `http://` and `https://` URLs are read; redirects are not followed
   and responses are capped at 64 KB.
-- URLs are stored in the plugin's `config.json` in plain text, so keep
-  tokens out of them.
-- Up to 12 hosts fit into the config form.
+- Extra-source URLs are stored in the plugin's `config.json` in plain text,
+  so keep tokens out of them.
+- Every host with an IP is probed on the agent port each interval (1–2 s
+  timeout, in parallel); hosts without an agent simply show nothing.
 
 ## Limitations
 
