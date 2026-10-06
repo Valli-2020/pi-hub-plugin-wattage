@@ -53,7 +53,7 @@ _opener = urllib.request.build_opener(_NoRedirect)
 
 class Wattage(Plugin):
     name = "wattage"
-    version = "1.0.0"
+    version = "1.0.1"
     description = "Current power draw (W) on each host card, read from any JSON URL"
     min_core_version = "8.0.0"
     plugin_api_version = 2
@@ -83,7 +83,7 @@ class Wattage(Plugin):
         for h in hosts:
             k, label = _key(h["id"]), h.get("name") or h["id"]
             fields.append({"name": "url_" + k, "label": label + " — URL", "type": "text",
-                           "placeholder": "http://192.168.0.50/status",
+                           "placeholder": "http://<device-ip>/status",
                            "help": "Empty = not monitored. Visible in the config, so no secrets in the URL."})
             fields.append({"name": "path_" + k, "label": label + " — JSON path", "type": "text",
                            "placeholder": "meters.0.power"})

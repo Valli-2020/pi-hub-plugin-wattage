@@ -1,6 +1,6 @@
 {
   "name": "wattage",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Current power draw (W) on each host card, read from any JSON URL (smart plug, Home Assistant, exporter)",
   "min_core_version": "8.0.0",
   "plugin_api_version": 2,
