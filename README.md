@@ -18,7 +18,7 @@ or the small host agent bundled in this repo.
   one feeding the whole rack) gets its own panel above the host cards —
   power, voltage, current, energy total, device temperature, relay state.
   Optionally its reading also becomes one host's badge.
-- **Total pill** in the header (`⚡ 69.3 W`): the mains Shellys, optionally
+- **Total pill** in the header (`69.3 W`, styled like the health pills): the mains Shellys, optionally
   plus all host readings (a toggle). A click opens the Power tab.
 - **Power graph**: a *Power* tab and a widget on the Hosts view — total,
   each mains Shelly and the hosts sum over 1 h, 6 h or 24 h. The history
@@ -35,8 +35,9 @@ or the small host agent bundled in this repo.
 2. Add the repository `https://github.com/Valli-2020/pi-hub-plugin-wattage`,
    click **Scan**, then **Install** and **Enable**.
 3. Approve the permissions: `hosts.read` (list your hosts), `ui.slots`
-   (badges and the Shelly panel), `ui.header` (the total pill) and
-   `ui.frame` (the power graph, a sandboxed frame).
+   (badges and the Shelly panel), `ui.header` (the total pill),
+   `ui.style` (scoped CSS so the pill matches the header) and `ui.frame`
+   (the power graph, a sandboxed frame).
 4. Install the host agent on the machines you want to measure (below).
 
 ## Configuration
@@ -49,7 +50,7 @@ Hosts are detected automatically; the *Hosts* list is only for exceptions.
 | Host agent port | Detection | `9871` | Port the agent answers on; `1` switches detection off |
 | Per-host settings | Hosts | empty | One row per host, see below |
 | Shelly meters | Shelly | empty | One row per Shelly, see below |
-| Show total in the header | Total | on | The `⚡ … W` pill |
+| Show total in the header | Total | on | The `… W` pill next to the health pills |
 | Add host readings to the total | Total | off | See *Total* below |
 | Show GPU badge | Badges | on | Turn the GPU badge off everywhere |
 | Hide GPU badge below (W) | Badges | `0.1` | Keeps idle integrated GPUs quiet |

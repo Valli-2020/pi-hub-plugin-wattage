@@ -183,13 +183,34 @@ BOLT_SVG = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-w
             'stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>')
 
 
+# Scoped by the core to .plg-wattage, so it only reaches this plugin's nodes.
+# Core health pills (.hpill) are 26 px with a status dot; plugin badges are
+# 20 px.  The total pill takes the health-pill look: same height, padding,
+# font and border, an accent dot in front (warn/bad colour it like .hpill.bad).
+PILL_CSS = (
+    '[data-slot="header.pill"] & .ph-badge { height:26px; padding:0 10px 0 9px; gap:6px; '
+    'font-size:12px; font-weight:600; letter-spacing:0; font-variant-numeric:tabular-nums; '
+    'color:var(--text); background:var(--surface); border-color:var(--border); }\n'
+    '[data-slot="header.pill"] & .ph-badge::before { content:""; flex:none; width:6px; height:6px; '
+    'border-radius:50%; background:var(--accent); }\n'
+    '[data-slot="header.pill"] & .ph-badge[data-tone="warn"] { color:var(--warn); '
+    'border-color:color-mix(in oklab, var(--warn) 45%, var(--border)); '
+    'background:color-mix(in oklab, var(--warn) 8%, var(--surface)); }\n'
+    '[data-slot="header.pill"] & .ph-badge[data-tone="warn"]::before { background:var(--warn); }\n'
+    '[data-slot="header.pill"] & .ph-badge[data-tone="bad"] { color:var(--bad); '
+    'border-color:color-mix(in oklab, var(--bad) 45%, var(--border)); '
+    'background:color-mix(in oklab, var(--bad) 8%, var(--surface)); }\n'
+    '[data-slot="header.pill"] & .ph-badge[data-tone="bad"]::before { background:var(--bad); }\n'
+)
+
+
 class Wattage(Plugin):
     name = "wattage"
-    version = "1.5.0"
+    version = "1.5.1"
     description = "Current power draw (W) and GPU power on each host card, Shelly meters above them"
     min_core_version = "8.3.0"
     plugin_api_version = 2
-    capabilities = ["hosts.read", "ui.frame", "ui.header", "ui.slots"]
+    capabilities = ["hosts.read", "ui.frame", "ui.header", "ui.slots", "ui.style"]
 
     def load(self, ctx) -> None:
         self.ctx = ctx
@@ -455,7 +476,8 @@ class Wattage(Plugin):
         return [Contribution("hosts.card.badges", "watts", self.p_watts, poll=15, order=30),
                 Contribution("hosts.card.badges", "gpu", self.p_gpu, poll=15, order=31),
                 Contribution("hosts.top", "shelly", self.p_shelly, poll=15, order=30),
-                Contribution("header.pill", "total", self.p_pill, poll=15, order=30, opens="power")]
+                Contribution("header.pill", "total", self.p_pill, poll=15, order=30, opens="power"),
+                Contribution("style", "pill", static={"css": PILL_CSS})]
 
     def get_frames(self):
         return [FrameDef("power", entry=["power.js"], css=["power.css"],
@@ -476,7 +498,7 @@ class Wattage(Plugin):
         if t["with_hosts"] and t["hosts"] is not None:
             parts.append("%d host%s %.0f W" % (t["host_n"], "" if t["host_n"] == 1 else "s", t["hosts"]))
         w = t["total"]
-        return {"type": "badge", "text": "⚡ " + (("%.1f" if w < 100 else "%.0f") % w) + " W",
+        return {"type": "badge", "text": (("%.1f" if w < 100 else "%.0f") % w) + " W",
                 "tone": self._tone(w) if self._tone(w) != "info" else "accent",
                 "title": "Total power: " + " + ".join(parts)}
 

@@ -162,15 +162,15 @@ def test_total_pill_toggle_and_history():
         assert p.p_pill() is None, "no mains Shelly, hosts off: no total"
         ctx.cfg["total_hosts"] = True
         pill = p.p_pill()
-        assert pill["text"] == "⚡ 25.6 W" and "2 hosts 26 W" in pill["title"], pill   # 2 agents x 12.8
+        assert pill["text"] == "25.6 W" and "2 hosts 26 W" in pill["title"], pill   # 2 agents x 12.8
         ctx.cfg.update(total_hosts=False, shellys=[{"name": "Homelab", "address": base + "/g2"},
                                                    {"address": base + "/g1", "host_id": "b"}])
         p.poll_all()
         pill = p.p_pill()
-        assert pill["text"] == "⚡ 69.3 W" and pill["title"] == "Total power: Homelab 69 W", pill
+        assert pill["text"] == "69.3 W" and pill["title"] == "Total power: Homelab 69 W", pill
         ctx.cfg["total_hosts"] = True                         # a = agent 12.8, b = Shelly with host id 12.5
         pill = p.p_pill()
-        assert pill["text"] == "⚡ 94.6 W" and "2 hosts 25 W" in pill["title"], pill
+        assert pill["text"] == "94.6 W" and "2 hosts 25 W" in pill["title"], pill
         ctx.cfg["show_pill"] = False
         assert p.p_pill() is None
         ctx.cfg["show_pill"] = True
@@ -226,7 +226,14 @@ def test_frame_and_routes_declared():
         assert "</script" not in body and "<!--" not in body
     pill = [c for c in p.get_contributions() if c.slot == "header.pill"][0]
     assert pill.opens == "power"
-    assert {"ui.frame", "ui.header"} <= set(p.capabilities)
+    assert {"ui.frame", "ui.header", "ui.style"} <= set(p.capabilities)
+    style = [c for c in p.get_contributions() if c.slot == "style"][0]
+    try:
+        from pi_hub.plugins import contrib
+        out = contrib.validate_style(style.static, "wattage")
+        assert ".plg-wattage" in json.dumps(out), out
+    except ImportError:
+        pass
     man = json.load(open("pi_hub_plugins/wattage/pihub-plugin.json"))
     assert man["version"] == p.version and set(man["capabilities"]) == set(p.capabilities)
     assert json.load(open("pihub-plugin.json")) == man

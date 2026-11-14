@@ -4,6 +4,14 @@ All notable changes to this plugin are documented here. Releases follow
 the repo-tag = version convention; each GitHub release ships the two
 assets `pihub-plugin.json` and the versioned tarball.
 
+## [1.5.1] - 2026-11-14
+
+### Fixed
+- The total pill now has the size and look of the core health pills in the
+  header (26 px, same padding and font, a dot in front instead of the ⚡
+  emoji); warn/bad colour it like a red health pill. Needs the new
+  permission `ui.style` (approve the plugin again after the update).
+
 ## [1.5.0] - 2026-11-14
 
 ### Added
