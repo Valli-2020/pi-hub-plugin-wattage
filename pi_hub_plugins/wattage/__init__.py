@@ -483,7 +483,7 @@ class Wattage(Plugin):
         return [FrameDef("power", entry=["power.js"], css=["power.css"],
                          surfaces=[{"type": "tab", "label": "Power", "icon_svg": BOLT_SVG},
                                    {"type": "widget", "view": "hosts"}],
-                         height=260)]
+                         height=44)]
 
     def get_routes(self):
         return [RouteDef("GET", "/history/{range}", self.r_history)]
@@ -630,44 +630,45 @@ class Wattage(Plugin):
                 if r["w"] is not None and r["gpu"] is not None and r["gpu"] >= gpu_min and now - r["ts"] <= stale}
 
     def p_shelly(self, session=None):
-        """One panel per Shelly above the host cards; nothing when none is configured."""
+        """One slim row per Shelly above the host cards; nothing when none is configured.
+
+        [● Homelab]  [65.8 W]  226.8 V · 0.58 A · 2541.7 kWh · 28 °C · 3 s ago
+        """
         now, stale, _, meters = self._snapshot()
         rows = self._cfg()["shellys"]
         if not rows:
             return {"type": "stack", "children": []}
-        panels = []
+        lines = []
         for addr, row in rows.items():
             m = meters.get(addr)
             if not m:
-                panels.append({"type": "section", "title": row["name"],
-                               "children": [{"type": "text", "text": "Waiting for the first reading…",
-                                             "tone": "muted"}]})
+                lines.append({"type": "stack", "dir": "row", "children": [
+                    {"type": "status", "state": "unknown", "text": row["name"]},
+                    {"type": "text", "text": "waiting for the first reading…", "tone": "muted"}]})
                 continue
             age = now - m["ts"]
             if m["w"] is None or age > stale:
-                panels.append({"type": "section", "title": row["name"], "children": [
-                    {"type": "badge", "text": "— W", "tone": "muted",
-                     "title": m["err"] or "no recent reading"},
-                    {"type": "text", "text": m["err"] or "No reading for %d s" % age, "tone": "muted"}]})
+                lines.append({"type": "stack", "dir": "row", "children": [
+                    {"type": "status", "state": "bad", "text": row["name"]},
+                    {"type": "badge", "text": "— W", "tone": "muted", "title": m["err"] or "no recent reading"},
+                    {"type": "text", "text": m["err"] or "no reading for %d s" % age, "tone": "muted"}]})
                 continue
             w = m["w"]
-            stats = [{"type": "stat", "label": "Power", "value": ("%.1f" if w < 100 else "%.0f") % w,
-                      "unit": "W", "tone": "" if self._tone(w) == "info" else self._tone(w)}]
+            state = "unknown" if m.get("on") is None else ("ok" if m["on"] else "off")
+            details = []
             if m.get("v") is not None:
-                stats.append({"type": "stat", "label": "Voltage", "value": "%.1f" % m["v"], "unit": "V"})
+                details.append("%.1f V" % m["v"])
             if m.get("a") is not None:
-                stats.append({"type": "stat", "label": "Current", "value": "%.2f" % m["a"], "unit": "A"})
+                details.append("%.2f A" % m["a"])
             if m.get("wh") is not None:
-                stats.append({"type": "stat", "label": "Energy total", "value": "%.1f" % (m["wh"] / 1000),
-                              "unit": "kWh"})
+                details.append("%.1f kWh" % (m["wh"] / 1000))
             if m.get("temp") is not None:
-                stats.append({"type": "stat", "label": "Device temp", "value": "%.0f" % m["temp"], "unit": "°C"})
-            head = []
-            if m.get("on") is not None:
-                head.append({"type": "status", "state": "ok" if m["on"] else "off",
-                             "text": "Relay on" if m["on"] else "Relay off"})
-            head.append({"type": "text", "text": "updated %d s ago" % age, "tone": "muted"})
-            panels.append({"type": "section", "title": row["name"], "children": [
-                {"type": "stack", "dir": "row", "children": head},
-                {"type": "columns", "children": stats}]})
-        return panels[0] if len(panels) == 1 else {"type": "stack", "children": panels}
+                details.append("%.0f °C" % m["temp"])
+            details.append("%d s ago" % age)
+            relay = "" if m.get("on") is None else (" — relay on" if m["on"] else " — relay off")
+            lines.append({"type": "stack", "dir": "row", "children": [
+                {"type": "status", "state": state, "text": row["name"]},
+                {"type": "badge", "text": ("%.1f" if w < 100 else "%.0f") % w + " W", "tone": self._tone(w),
+                 "title": "Shelly %s%s" % (row["name"], relay)},
+                {"type": "text", "text": " · ".join(details), "tone": "muted"}]})
+        return lines[0] if len(lines) == 1 else {"type": "stack", "children": lines}

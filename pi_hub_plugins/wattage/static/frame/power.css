@@ -23,3 +23,12 @@ canvas { width: 100%; display: block; }
 .tip .tr { display: flex; align-items: center; gap: 6px; }
 .tip .tn { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tip .tv { font-variant-numeric: tabular-nums; font-weight: 600; }
+/* compact widget on the Hosts view: one slim row */
+body.compact { padding: 6px 12px; }
+.crow { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+.clabel { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted, #666); flex: none; }
+.cval { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 62px; flex: none; }
+.cwrap { flex: 1; min-width: 60px; }
+.cwrap canvas { width: 100%; display: block; }
+.crange { font-size: 11px; color: var(--muted, #666); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+@media (max-width: 420px) { .crange { display: none; } }

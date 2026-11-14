@@ -4,7 +4,7 @@
 (function () {
   'use strict';
   var TAB = ph.surface === 'tab';
-  var H = TAB ? 300 : 170;                     // canvas height (CSS px)
+  var H = 300;                                 // canvas height of the tab chart (CSS px)
   var PAD = { l: 44, r: 10, t: 10, b: 22 };
   var range = '1h', data = null, busy = false, hover = -1;
 
@@ -31,7 +31,80 @@
     return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
   }
 
-  // ── layout ──────────────────────────────────────────────────────────────
+  if (!TAB) { compact(); return; }
+
+  // ── compact widget (Hosts view): one slim row, total over the last hour ──
+  function compact() {
+    document.body.className = 'compact';
+    var SH = 30, pts = [], hov = -1, cbusy = false;
+    var row = el('div', 'crow');
+    row.appendChild(el('span', 'clabel', 'Power'));
+    var val = el('span', 'cval', '—'); row.appendChild(val);
+    var cw = el('div', 'cwrap'); var cv = el('canvas'); cv.style.height = SH + 'px'; cw.appendChild(cv);
+    row.appendChild(cw);
+    var rng = el('span', 'crange', ''); row.appendChild(rng);
+    document.body.appendChild(row);
+
+    function last() { for (var i = pts.length - 1; i >= 0; i--) if (pts[i][1] != null) return pts[i]; return null; }
+    function cdraw() {
+      var dpr = window.devicePixelRatio || 1, w = cv.clientWidth || 200;
+      cv.width = Math.round(w * dpr); cv.height = Math.round(SH * dpr);
+      var g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, SH);
+      var vals = pts.filter(function (p) { return p[1] != null; }).map(function (p) { return p[1]; });
+      var cur = hov >= 0 && pts[hov] ? pts[hov] : last();
+      val.textContent = cur ? fmtW(cur[1]) : '—';
+      val.title = cur && hov >= 0 ? hhmm(cur[0]) : 'now';
+      if (vals.length < 2) { rng.textContent = vals.length ? '' : 'collecting…'; return; }
+      var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+      rng.textContent = lo.toFixed(0) + '–' + hi.toFixed(0) + ' W · 1h';
+      var pad = Math.max((hi - lo) * 0.15, 1), y0 = lo - pad, y1 = hi + pad;
+      var t1 = Date.now() / 1000, t0 = t1 - 3600;
+      var X = function (t) { return 1 + (t - t0) / (t1 - t0) * (w - 2); };
+      var Y = function (v2) { return 2 + (1 - (v2 - y0) / (y1 - y0)) * (SH - 4); };
+      var c = v('--accent', '#b45309');
+      g.strokeStyle = c; g.lineWidth = 1.5; g.lineJoin = 'round';
+      var segs = [], seg = [];
+      pts.forEach(function (p) { if (p[1] == null) { if (seg.length) segs.push(seg); seg = []; } else seg.push(p); });
+      if (seg.length) segs.push(seg);
+      segs.forEach(function (sp) {
+        g.beginPath();
+        sp.forEach(function (p, k) { if (k) g.lineTo(X(p[0]), Y(p[1])); else g.moveTo(X(p[0]), Y(p[1])); });
+        g.stroke();
+        if (sp.length > 1) {
+          g.lineTo(X(sp[sp.length - 1][0]), SH); g.lineTo(X(sp[0][0]), SH); g.closePath();
+          g.globalAlpha = 0.10; g.fillStyle = c; g.fill(); g.globalAlpha = 1;
+        }
+      });
+      var m = cur && cur[1] != null ? cur : null;
+      if (m) { g.fillStyle = c; g.beginPath(); g.arc(X(m[0]), Y(m[1]), 2.5, 0, 7); g.fill(); }
+    }
+    function cpoll() {
+      if (cbusy || !ph.visible) return;
+      cbusy = true;
+      ph.call('history/1h').then(function (d) {
+        var tot = d && d.series ? d.series.filter(function (x) { return x.key === 'total'; })[0] : null;
+        pts = tot ? tot.points : [];
+        if (hov >= pts.length) hov = -1;
+        cdraw();
+      }).catch(function () {}).then(function () { cbusy = false; });
+    }
+    cv.addEventListener('mousemove', function (e) {
+      if (!pts.length) return;
+      var r = cv.getBoundingClientRect(), w = r.width, t1 = Date.now() / 1000, t0 = t1 - 3600;
+      var mt = t0 + (e.clientX - r.left) / w * 3600, best = -1, bd = 1e12;
+      pts.forEach(function (p, i) { if (p[1] != null && Math.abs(p[0] - mt) < bd) { bd = Math.abs(p[0] - mt); best = i; } });
+      if (best !== hov) { hov = best; cdraw(); }
+    });
+    cv.addEventListener('mouseleave', function () { hov = -1; cdraw(); });
+    window.addEventListener('resize', cdraw);
+    ph.on('visible', function (vis) { if (vis) cpoll(); });
+    ph.on('refresh', cpoll);
+    ph.on('theme', cdraw);
+    cdraw(); cpoll();
+    setInterval(cpoll, 15000);
+  }
+
+  // ── layout (Power tab) ───────────────────────────────────────────────────
   var head = el('div', 'head');
   var title = el('div', 'title');
   title.appendChild(el('span', 'label', 'Power'));

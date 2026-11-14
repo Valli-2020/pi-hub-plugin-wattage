@@ -126,13 +126,11 @@ def test_shelly_polling_and_panel():
         assert p._shelly_rpc["http://%s/g1" % base] == "/status"       # Gen1 found via fallback
         panel = p.p_shelly()
         homelab, gen1, locked = panel["children"]
-        assert homelab["title"] == "Homelab" and gen1["title"] == "http://%s/g1" % base
-        stats = {c["label"]: c["value"] for c in homelab["children"][1]["children"]}
-        assert stats == {"Power": "69.3", "Voltage": "226.5", "Current": "0.58",
-                         "Energy total": "2541.7", "Device temp": "28"}, stats
-        assert homelab["children"][0]["children"][0]["text"] == "Relay on"
-        assert gen1["children"][0]["children"][0]["state"] == "off"
-        assert "password" in locked["children"][1]["text"], locked
+        st, badge, txt = homelab["children"]
+        assert st == {"type": "status", "state": "ok", "text": "Homelab"} and badge["text"] == "69.3 W", homelab
+        assert txt["text"].startswith("226.5 V · 0.58 A · 2541.7 kWh · 28 °C · "), txt
+        assert gen1["children"][0]["text"] == "http://%s/g1" % base and gen1["children"][0]["state"] == "off"
+        assert locked["children"][0]["state"] == "bad" and "password" in locked["children"][2]["text"], locked
         out = p.p_watts()                                              # host id -> card badge
         assert set(out) == {"b"} and out["b"]["text"] == "12.5 W" and "Shelly" in out["b"]["title"], out
         try:
@@ -144,9 +142,9 @@ def test_shelly_polling_and_panel():
         ctx.cfg["shellys"] = ctx.cfg["shellys"][:1]
         p.poll_all()
         assert set(p._meters) == {base + "/g2"} and p.p_watts() == {}
-        assert p.p_shelly()["title"] == "Homelab"                       # one meter: no wrapper
+        assert p.p_shelly()["children"][0]["text"] == "Homelab"         # one meter: no wrapper
         ctx.cfg["warn_w"] = 50
-        assert p.p_shelly()["children"][1]["children"][0]["tone"] == "warn"
+        assert p.p_shelly()["children"][1]["tone"] == "warn"
     finally:
         srv.shutdown()
 
@@ -220,6 +218,8 @@ def test_frame_and_routes_declared():
     p, _ = make()
     f = p.get_frames()[0]
     assert f.id == "power" and {s["type"] for s in f.surfaces} == {"tab", "widget"}
+    js = open(os.path.join("pi_hub_plugins", "wattage", "static", "frame", "power.js")).read()
+    assert "if (!TAB) { compact(); return; }" in js            # Hosts widget = slim sparkline row
     root = os.path.join("pi_hub_plugins", "wattage", "static", "frame")
     for name in f.entry + f.css:
         body = open(os.path.join(root, name)).read()

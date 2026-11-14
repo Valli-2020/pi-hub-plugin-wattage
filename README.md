@@ -15,13 +15,14 @@ or the small host agent bundled in this repo.
 - **GPU badge**: shown when the host reports GPU power (NVIDIA, AMD, or an
   integrated GPU under load).
 - **Shelly meters**: a Shelly plug or relay with power metering (e.g. the
-  one feeding the whole rack) gets its own panel above the host cards —
-  power, voltage, current, energy total, device temperature, relay state.
+  one feeding the whole rack) gets one line above the host cards — relay
+  state, power, voltage, current, energy total, device temperature.
   Optionally its reading also becomes one host's badge.
 - **Total pill** in the header (`69.3 W`, styled like the health pills): the mains Shellys, optionally
   plus all host readings (a toggle). A click opens the Power tab.
-- **Power graph**: a *Power* tab and a widget on the Hosts view — total,
-  each mains Shelly and the hosts sum over 1 h, 6 h or 24 h. The history
+- **Power graph**: the *Power* tab shows total, each mains Shelly and the
+  hosts sum over 1 h, 6 h or 24 h; the Hosts view gets a slim one-line
+  sparkline of the total over the last hour. The history
   is kept for 24 h in the plugin's `data/` folder.
 - **Extra sources**: any other JSON endpoint (metered smart plug, Home
   Assistant) can be added as a row in the *Hosts* setting.

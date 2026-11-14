@@ -12,6 +12,13 @@ assets `pihub-plugin.json` and the versioned tarball.
   emoji); warn/bad colour it like a red health pill. Needs the new
   permission `ui.style` (approve the plugin again after the update).
 
+### Changed
+- Hosts view is much slimmer: the graph widget is one row with the current
+  total, a small sparkline of the last hour (hover for earlier values) and
+  the min–max. Axes, legend and range buttons stay in the Power tab.
+- The Shelly panel is one line per meter: name with relay state, power,
+  then voltage, current, energy, temperature and age as muted text.
+
 ## [1.5.0] - 2026-11-14
 
 ### Added
