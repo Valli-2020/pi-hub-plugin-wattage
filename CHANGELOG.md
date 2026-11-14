@@ -4,6 +4,23 @@ All notable changes to this plugin are documented here. Releases follow
 the repo-tag = version convention; each GitHub release ships the two
 assets `pihub-plugin.json` and the versioned tarball.
 
+## [1.6.0] - 2026-11-14
+
+### Added
+- **Power tab in detail:**
+  - Key figures for the selected range: now, average, min / max, energy
+    used (from the Shelly counter when possible, else integrated), and a
+    projection per day, month and year.
+  - Costs next to the energy figures when *Energy price per kWh* is set
+    (new settings *Energy price per kWh* and *Currency*, section *Total*).
+  - *Shelly meters* table: relay state, role (mains or host), power,
+    voltage, current, energy counter, temperature, last update.
+  - *Hosts* table: source (agent CPU only, agent + base load, JSON source,
+    Shelly), power, GPU, share of the total, last update — plus a *Rest*
+    row (mains minus hosts: switch, router, disks …) when the hosts are not
+    added to the total.
+- History samples now also keep the Shelly energy counter.
+
 ## [1.5.1] - 2026-11-14
 
 ### Fixed

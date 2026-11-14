@@ -1,5 +1,6 @@
 // wattage — power graph.  Runs sandboxed (opaque origin, no network, no
-// storage); data comes only through ph.call('history/<range>').  Text from the
+// storage); data comes only through ph.call('history/<range>') and
+// ph.call('details').  Text from the
 // hub (meter names) is only ever set with textContent, never innerHTML.
 (function () {
   'use strict';
@@ -124,12 +125,99 @@
   });
   head.appendChild(seg);
   document.body.appendChild(head);
+  var cards = el('div', 'cards'); document.body.appendChild(cards);
   var legend = el('div', 'legend'); document.body.appendChild(legend);
   var wrap = el('div', 'wrap'); document.body.appendChild(wrap);
   var canvas = el('canvas'); canvas.style.height = H + 'px'; wrap.appendChild(canvas);
   var tip = el('div', 'tip'); wrap.appendChild(tip);
   var empty = el('div', 'empty', 'Collecting samples… the first points appear after one poll interval.');
   wrap.appendChild(empty);
+  var secMeters = el('div', 'sec'); document.body.appendChild(secMeters);
+  var secHosts = el('div', 'sec'); document.body.appendChild(secHosts);
+
+  // ── key figures + tables ────────────────────────────────────────────────
+  function dur(sec) {
+    if (sec < 90) return Math.round(sec) + ' s';
+    if (sec < 5400) return Math.round(sec / 60) + ' min';
+    return (sec / 3600).toFixed(sec < 36000 ? 1 : 0) + ' h';
+  }
+  function kwh(x) { return x == null ? '—' : (x < 10 ? x.toFixed(2) : x < 100 ? x.toFixed(1) : x.toFixed(0)) + ' kWh'; }
+  function money(x, cur) { return x == null ? '' : x.toFixed(2) + ' ' + (cur || ''); }
+  function card(label, value, sub, title) {
+    var c = el('div', 'card');
+    c.appendChild(el('div', 'cl', label));
+    c.appendChild(el('div', 'cv', value));
+    if (sub) c.appendChild(el('div', 'cs', sub));
+    if (title) c.title = title;
+    cards.appendChild(c);
+  }
+  function renderStats(st) {
+    cards.textContent = '';
+    if (!st || st.now == null) return;
+    var cur = st.currency;
+    card('Now', fmtW(st.now));
+    card('Average', fmtW(st.avg), range);
+    card('Min / max', (st.min < 100 ? st.min.toFixed(1) : st.min.toFixed(0)) + ' – ' + fmtW(st.max), range);
+    card('Energy', kwh(st.kwh), (st.cost != null ? money(st.cost, cur) + ' · ' : '') + 'over ' + dur(st.covered_s),
+         st.energy_source === 'counter' ? 'From the Shelly energy counter' : 'Integrated from the samples');
+    var d = st.per_day_kwh;
+    card('Per day', kwh(d), st.per_day_cost != null ? money(st.per_day_cost, cur) : 'at the ' + range + ' average');
+    card('Per month', kwh(d * 30), st.per_day_cost != null ? money(st.per_day_cost * 30, cur) : '30 days');
+    card('Per year', kwh(d * 365), st.per_day_cost != null ? money(st.per_day_cost * 365, cur) : '365 days');
+  }
+  function table(box, title, cols, rows, foot) {
+    box.textContent = '';
+    if (!rows.length) return;
+    box.appendChild(el('h4', null, title));
+    var t = el('table'), hr = el('tr');
+    cols.forEach(function (c) { var th = el('th', c.num ? 'num' : '', c.label); hr.appendChild(th); });
+    var th = el('thead'); th.appendChild(hr); t.appendChild(th);
+    var tb = el('tbody');
+    rows.concat(foot ? [foot] : []).forEach(function (r, i) {
+      var tr = el('tr', foot && i === rows.length ? 'foot' : '');
+      cols.forEach(function (c) {
+        var val = r[c.key], td = el('td', c.num ? 'num' : '');
+        if (val && typeof val === 'object' && val.dot) {
+          var dot = el('span', 'sdot ' + val.dot); td.appendChild(dot); td.appendChild(document.createTextNode(val.text));
+        } else td.textContent = val == null || val === '' ? '—' : val;
+        if (r._err && c.key === 'w') td.title = r._err;
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb);
+    var sc = el('div', 'tscroll'); sc.appendChild(t); box.appendChild(sc);
+  }
+  function renderDetails(d) {
+    var ref = d.with_hosts ? d.total : (d.mains_w != null ? d.mains_w : d.hosts_w);
+    table(secMeters, 'Shelly meters', [
+      { key: 'name', label: 'Meter' }, { key: 'role', label: 'Role' }, { key: 'w', label: 'Power', num: 1 },
+      { key: 'v', label: 'Voltage', num: 1 }, { key: 'a', label: 'Current', num: 1 },
+      { key: 'kwh', label: 'Counter', num: 1 }, { key: 'temp', label: 'Temp', num: 1 }, { key: 'age', label: 'Updated', num: 1 }
+    ], d.meters.map(function (m) {
+      return {
+        name: { dot: m.on == null ? 'unk' : m.on ? 'ok' : 'off', text: m.name },
+        role: m.mains ? 'mains' : 'host ' + m.host,
+        w: m.w == null ? (m.err ? 'error' : '—') : fmtW(m.w), _err: m.err,
+        v: m.v == null ? '' : m.v.toFixed(1) + ' V', a: m.a == null ? '' : m.a.toFixed(2) + ' A',
+        kwh: m.kwh == null ? '' : m.kwh.toFixed(1) + ' kWh', temp: m.temp == null ? '' : m.temp.toFixed(0) + ' °C',
+        age: m.age == null ? '' : dur(m.age) + ' ago'
+      };
+    }));
+    var foot = null;
+    if (d.rest_w != null) foot = { name: 'Rest (mains − hosts)', source: 'switch, router, disks, …', w: fmtW(d.rest_w),
+                                   share: ref ? Math.round(d.rest_w / ref * 100) + ' %' : '' };
+    table(secHosts, 'Hosts', [
+      { key: 'name', label: 'Host' }, { key: 'source', label: 'Source' }, { key: 'w', label: 'Power', num: 1 },
+      { key: 'gpu', label: 'GPU', num: 1 }, { key: 'share', label: 'Share', num: 1 }, { key: 'age', label: 'Updated', num: 1 }
+    ], d.hosts.map(function (h) {
+      return {
+        name: h.name, source: h.source, w: h.w == null ? (h.err ? 'error' : '—') : fmtW(h.w), _err: h.err,
+        gpu: h.gpu == null ? '' : fmtW(h.gpu), share: h.w != null && ref ? Math.round(h.w / ref * 100) + ' %' : '',
+        age: dur(h.age) + ' ago'
+      };
+    }), foot);
+  }
 
   // ── drawing ─────────────────────────────────────────────────────────────
   function geometry() {
@@ -250,6 +338,7 @@
       });
     }
     if (hover >= 0 && (!d.series.length || hover >= d.series[0].points.length)) hover = -1;
+    renderStats(d.stats);
     draw();
   }
 
@@ -258,6 +347,8 @@
     busy = true;
     var want = range;
     ph.call('history/' + want).then(function (d) { if (want === range && d && d.series) render(d); })
+      .then(function () { return ph.call('details'); })
+      .then(function (d) { if (d && d.meters) renderDetails(d); })
       .catch(function () { /* transient */ })
       .then(function () { busy = false; });
   }

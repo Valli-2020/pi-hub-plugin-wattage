@@ -20,9 +20,12 @@ or the small host agent bundled in this repo.
   Optionally its reading also becomes one host's badge.
 - **Total pill** in the header (`69.3 W`, styled like the health pills): the mains Shellys, optionally
   plus all host readings (a toggle). A click opens the Power tab.
-- **Power graph**: the *Power* tab shows total, each mains Shelly and the
-  hosts sum over 1 h, 6 h or 24 h; the Hosts view gets a slim one-line
-  sparkline of the total over the last hour. The history
+- **Power tab**: graph of the total, each mains Shelly and the hosts sum
+  over 1 h, 6 h or 24 h; key figures (now, average, min / max, energy,
+  projection per day / month / year, costs with a set price); a table of
+  the Shelly meters and one of the hosts with their source, share of the
+  total and the unmeasured rest.
+- **Hosts view**: a slim one-line sparkline of the total over the last hour. The history
   is kept for 24 h in the plugin's `data/` folder.
 - **Extra sources**: any other JSON endpoint (metered smart plug, Home
   Assistant) can be added as a row in the *Hosts* setting.
@@ -53,6 +56,8 @@ Hosts are detected automatically; the *Hosts* list is only for exceptions.
 | Shelly meters | Shelly | empty | One row per Shelly, see below |
 | Show total in the header | Total | on | The `… W` pill next to the health pills |
 | Add host readings to the total | Total | off | See *Total* below |
+| Energy price per kWh | Total | `0` | Cost figures in the Power tab; `0` hides them |
+| Currency | Total | `€` | Shown after the costs |
 | Show GPU badge | Badges | on | Turn the GPU badge off everywhere |
 | Hide GPU badge below (W) | Badges | `0.1` | Keeps idle integrated GPUs quiet |
 | Warn / Bad above (W) | Badges | `0` | Badge colour limits; `0` = no colour change |
@@ -140,7 +145,8 @@ PIHUB_CORE=<pi-hub checkout> python3 tests/test_plugin_wattage.py   # or pytest
 
 The tests run the plugin against a local stub server (JSON path, redirect
 refusal, GPU badge, thresholds, config migration, live settings, Shelly
-Gen1/Gen2 parsing and panel, total pill and toggle, graph history).
+Gen1/Gen2 parsing and panel, total pill and toggle, graph history,
+key figures and the Power tab tables).
 
 ## Release assets
 

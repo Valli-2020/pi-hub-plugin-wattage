@@ -198,6 +198,48 @@ def test_total_pill_toggle_and_history():
         srv.shutdown()
 
 
+def test_stats_and_details():
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_port
+    base = "127.0.0.1:%d" % port
+    try:
+        p, ctx = make({"agent_port": port, "shellys": [{"name": "Homelab", "address": base + "/g2"},
+                                                       {"address": base + "/g1", "host_id": "b"}]})
+        p.poll_all()
+        now = __import__("time").time()
+        m = base + "/g2"
+        p._history = [{"t": now - 1800 + i * 15, "total": 60.0 + (i % 2) * 20, "hosts": 25.0,
+                       "m": {m: 60.0}, "wh": {m: 1000.0 + i}} for i in range(121)]   # 30 min, +120 Wh
+        st = p.r_history({"range": "1h"})["stats"]
+        assert st["energy_source"] == "counter" and st["kwh"] == 0.12, st
+        assert st["min"] == 60.0 and st["max"] == 80.0 and 69 < st["avg"] < 71 and st["covered_s"] == 1800, st
+        assert "cost" not in st and st["per_day_kwh"] == round(st["avg"] * 24 / 1000, 2)
+        ctx.cfg.update(price_kwh=0.30, currency="EUR", total_hosts=True)   # hosts added: counter not usable
+        st = p.r_history({"range": "1h"})["stats"]
+        assert st["energy_source"] == "integral" and abs(st["kwh"] - 0.035) < 0.001, st   # 70 W x 0.5 h
+        assert st["cost"] == round(st["kwh"] * 0.30, 2) and st["currency"] == "EUR", st
+        assert p.r_history({"range": "24h"})["stats"]["samples"] == 121
+        p._history = []
+        assert p.r_history({"range": "1h"})["stats"] == {}
+
+        ctx.cfg["total_hosts"] = False
+        d = p.r_details()
+        assert [x["name"] for x in d["meters"]] == ["Homelab", base + "/g1"], d
+        assert d["meters"][0]["mains"] and d["meters"][0]["w"] == 69.3 and d["meters"][0]["kwh"] == 2541.73
+        assert not d["meters"][1]["mains"] and d["meters"][1]["host"] == "b"
+        hosts = {h["id"]: h for h in d["hosts"]}
+        assert hosts["a"]["source"] == "agent: CPU only" and hosts["a"]["w"] == 12.8, hosts
+        assert hosts["b"]["source"].startswith("Shelly ") and hosts["b"]["w"] == 12.5, hosts
+        assert d["hosts_w"] == 25.3 and d["rest_w"] == 44.0 and d["total"] == 69.3, d
+        ctx.cfg["hosts"] = [{"host_id": "a", "base_w": 10}]
+        assert {h["id"]: h for h in p.r_details()["hosts"]}["a"]["source"] == "agent: CPU + base 10 W"
+        ctx.cfg["total_hosts"] = True
+        assert p.r_details()["rest_w"] is None                 # hosts added on top: no rest row
+    finally:
+        srv.shutdown()
+
+
 def test_history_persists(tmp=None):
     import tempfile
     d = tempfile.mkdtemp()
@@ -235,6 +277,7 @@ def test_frame_and_routes_declared():
     except ImportError:
         pass
     man = json.load(open("pi_hub_plugins/wattage/pihub-plugin.json"))
+    assert {r.path for r in p.get_routes()} == {"/history/{range}", "/details"}
     assert man["version"] == p.version and set(man["capabilities"]) == set(p.capabilities)
     assert json.load(open("pihub-plugin.json")) == man
 

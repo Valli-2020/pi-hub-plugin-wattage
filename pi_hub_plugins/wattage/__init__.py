@@ -52,7 +52,7 @@ def extract(data: Any, path: str) -> float:
 DEFAULTS: dict[str, Any] = {
     "agent_port": 9871, "show_gpu": True, "gpu_min_w": 0.1, "interval": 15, "timeout": 2,
     "stale_polls": 3, "warn_w": 0, "bad_w": 0, "hosts": [], "shellys": [],
-    "show_pill": True, "total_hosts": False,
+    "show_pill": True, "total_hosts": False, "price_kwh": 0, "currency": "€",
 }
 
 
@@ -206,7 +206,7 @@ PILL_CSS = (
 
 class Wattage(Plugin):
     name = "wattage"
-    version = "1.5.1"
+    version = "1.6.0"
     description = "Current power draw (W) and GPU power on each host card, Shelly meters above them"
     min_core_version = "8.3.0"
     plugin_api_version = 2
@@ -268,7 +268,8 @@ class Wattage(Plugin):
         now = time.time()
         t = self._totals()
         sample = {"t": round(now), "total": t["total"], "hosts": t["hosts"],
-                  "m": {a: m["w"] for a, m in t["mains"].items()}}
+                  "m": {a: m["w"] for a, m in t["mains"].items()},
+                  "wh": {a: m["wh"] for a, m in t["mains"].items() if m.get("wh") is not None}}
         with self._lock:
             if self._history and now - self._history[-1]["t"] < SAMPLE_GAP_S:
                 return
@@ -294,7 +295,8 @@ class Wattage(Plugin):
         cfg["timeout"] = max(0.1, _num(cfg["timeout"], 2))
         cfg["stale_polls"] = max(1.0, _num(cfg["stale_polls"], 3))
         cfg["agent_port"] = int(_num(cfg["agent_port"], 9871))
-        for k in ("warn_w", "bad_w", "gpu_min_w"):
+        cfg["currency"] = str(cfg["currency"] or "")[:8]
+        for k in ("warn_w", "bad_w", "gpu_min_w", "price_kwh"):
             cfg[k] = _num(cfg[k], DEFAULTS[k])
         rows = cfg["hosts"] if isinstance(cfg["hosts"], list) else []
         cfg["hosts"] = {str(r["host_id"]).strip(): r for r in rows
@@ -342,6 +344,10 @@ class Wattage(Plugin):
              "help": "Off: the total is the Shelly meters without a host id (e.g. the one feeding the whole "
                      "homelab). On: the host badges are added too — leave it off when the hosts already "
                      "hang behind that Shelly, or they are counted twice."},
+            {"name": "price_kwh", "label": "Energy price per kWh", "type": "number", "min": 0, "max": 100,
+             "default": 0, "section": "Total",
+             "help": "For the cost figures in the Power tab, e.g. 0.32. 0 hides the costs."},
+            {"name": "currency", "label": "Currency", "type": "text", "default": "€", "section": "Total"},
             {"name": "show_gpu", "label": "Show GPU badge", "type": "checkbox", "default": True,
              "section": "Badges"},
             {"name": "gpu_min_w", "label": "Hide GPU badge below (W)", "type": "number", "min": 0,
@@ -486,7 +492,8 @@ class Wattage(Plugin):
                          height=44)]
 
     def get_routes(self):
-        return [RouteDef("GET", "/history/{range}", self.r_history)]
+        return [RouteDef("GET", "/history/{range}", self.r_history),
+                RouteDef("GET", "/details", self.r_details)]
 
     def p_pill(self, session=None):
         if not self._cfg()["show_pill"]:
@@ -531,7 +538,82 @@ class Wattage(Plugin):
             out.append({"key": "hosts", "name": "Hosts (sum)", "points": series["hosts"]})
         out = [s for s in out if any(v is not None for _, v in s["points"])]
         return {"range": span, "now": round(now), "with_hosts": bool(cfg["total_hosts"]),
-                "warn_w": cfg["warn_w"], "bad_w": cfg["bad_w"], "series": out}
+                "warn_w": cfg["warn_w"], "bad_w": cfg["bad_w"], "series": out,
+                "stats": self._stats(rows, list(mains), cfg)}
+
+    def _stats(self, rows, mains: list[str], cfg) -> dict[str, Any]:
+        """Now/avg/min/max of the total, energy in the range and a per-day projection.
+
+        Energy: the Shelly lifetime counters (exact) when every mains meter has
+        one at both ends and hosts are not added; else the integral of the
+        total over the samples (gaps longer than 3 poll intervals skipped).
+        """
+        pts = [(r["t"], r["total"]) for r in rows if r.get("total") is not None]
+        if not pts:
+            return {}
+        vals = [w for _, w in pts]
+        gap = max(3 * cfg["interval"], 3 * SAMPLE_GAP_S)
+        wh = covered = 0.0
+        for (t0, w0), (t1, w1) in zip(pts, pts[1:]):
+            if 0 < t1 - t0 <= gap:
+                wh += (w0 + w1) / 2 * (t1 - t0) / 3600
+                covered += t1 - t0
+        source = "integral"
+        if mains and not cfg["total_hosts"]:
+            first = next((r for r in rows if r.get("wh")), None)
+            last = next((r for r in reversed(rows) if r.get("wh")), None)
+            if first and last and first is not last and all(a in first["wh"] and a in last["wh"] for a in mains):
+                delta = sum(last["wh"][a] - first["wh"][a] for a in mains)
+                if delta >= 0:
+                    wh, covered, source = delta, float(last["t"] - first["t"]), "counter"
+        avg = sum(vals) / len(vals)
+        price = cfg["price_kwh"]
+        out = {"now": vals[-1], "avg": round(avg, 1), "min": min(vals), "max": max(vals),
+               "kwh": round(wh / 1000, 3), "covered_s": round(covered), "energy_source": source,
+               "per_day_kwh": round(avg * 24 / 1000, 2), "samples": len(vals),
+               "price_kwh": price, "currency": cfg["currency"]}
+        if price:
+            out["cost"] = round(wh / 1000 * price, 2)
+            out["per_day_cost"] = round(avg * 24 / 1000 * price, 2)
+        return out
+
+    def r_details(self):
+        """Current readings for the Power tab tables: meters, hosts, rest."""
+        now, stale, snap, meters = self._snapshot()
+        cfg = self._cfg()
+        names = {h.get("id"): h.get("name") or h.get("id") for h in self.ctx.get_hosts()}
+        base = {hid: max(0.0, _num(r.get("base_w"), 0)) for hid, r in cfg["hosts"].items() if r.get("base_w")}
+        t = self._totals()
+        out_m = []
+        for addr, row in cfg["shellys"].items():
+            m = meters.get(addr) or {}
+            fresh = m.get("w") is not None and now - m.get("ts", 0) <= stale
+            out_m.append({"name": row["name"], "host": names.get(row["host_id"], row["host_id"]) if row["host_id"] else "",
+                          "mains": not row["host_id"], "w": m.get("w") if fresh else None,
+                          "v": m.get("v"), "a": m.get("a"), "kwh": round(m["wh"] / 1000, 2) if m.get("wh") is not None else None,
+                          "temp": m.get("temp"), "on": m.get("on"),
+                          "age": round(now - m["ts"]) if m.get("ts") else None, "err": m.get("err", "")})
+        out_h = []
+        for hid, r in sorted(self._host_readings(now, stale, snap, meters, cfg).items(),
+                             key=lambda kv: str(names.get(kv[0], kv[0])).lower()):
+            fresh = r["w"] is not None and now - r["ts"] <= stale
+            if r.get("shelly"):
+                src = "Shelly " + r["shelly"]
+            elif r.get("cpu_only"):
+                src = "agent: CPU + base %.0f W" % base[hid] if hid in base else "agent: CPU only"
+            else:
+                src = "JSON source"
+            out_h.append({"id": hid, "name": names.get(hid, hid), "source": src,
+                          "w": round(self._host_watts(r, base, hid), 1) if fresh else None,
+                          "gpu": r.get("gpu") if fresh else None,
+                          "age": round(now - r["ts"]), "err": r.get("err", "")})
+        mains_w = sum(m["w"] for m in t["mains"].values()) if t["mains"] else None
+        rest = None
+        if mains_w is not None and t["hosts"] is not None and not t["with_hosts"]:
+            rest = round(mains_w - t["hosts"], 1)
+        return {"total": t["total"], "mains_w": mains_w, "hosts_w": t["hosts"], "rest_w": rest,
+                "with_hosts": t["with_hosts"], "meters": out_m, "hosts": out_h,
+                "interval": cfg["interval"]}
 
     def _tone(self, w: float) -> str:
         cfg = self._cfg()
@@ -574,7 +656,7 @@ class Wattage(Plugin):
         for addr, row in cfg["shellys"].items():
             m = meters.get(addr)
             if not row["host_id"] and m and m["w"] is not None and now - m["ts"] <= stale:
-                mains[addr] = {"name": row["name"], "w": m["w"]}
+                mains[addr] = {"name": row["name"], "w": m["w"], "wh": m.get("wh")}
         hosts = {hid: self._host_watts(r, base, hid)
                  for hid, r in self._host_readings(now, stale, snap, meters, cfg).items()
                  if r["w"] is not None and now - r["ts"] <= stale}

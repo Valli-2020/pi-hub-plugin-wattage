@@ -32,3 +32,23 @@ body.compact { padding: 6px 12px; }
 .cwrap canvas { width: 100%; display: block; }
 .crange { font-size: 11px; color: var(--muted, #666); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
 @media (max-width: 420px) { .crange { display: none; } }
+/* Power tab: key figures and tables */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; margin: 12px 0 4px; }
+.card { border: 1px solid var(--border, #ddd); border-radius: var(--radius-sm, 6px); background: var(--surface-2, #f6f6f6);
+        padding: 7px 10px; min-width: 0; }
+.card .cl { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted, #666); }
+.card .cv { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; white-space: nowrap; }
+.card .cs { font-size: 11px; color: var(--muted, #666); font-variant-numeric: tabular-nums; margin-top: 1px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sec h4 { margin: 18px 0 6px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted, #666); }
+.tscroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th { text-align: left; font-weight: 500; color: var(--muted, #666); font-size: 11.5px; padding: 4px 8px;
+     border-bottom: 1px solid var(--border, #ddd); white-space: nowrap; }
+td { padding: 5px 8px; border-bottom: 1px solid var(--border, #eee); white-space: nowrap; }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.foot td { color: var(--muted, #666); font-style: italic; border-bottom: 0; }
+.sdot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 7px; vertical-align: middle;
+        background: var(--muted, #999); }
+.sdot.ok { background: var(--ok, #15803d); }
+.sdot.off { background: var(--bad, #b91c1c); }
