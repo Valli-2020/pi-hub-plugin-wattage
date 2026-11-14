@@ -1,10 +1,10 @@
 {
   "name": "wattage",
-  "version": "1.4.0",
-  "description": "Current power draw (W) on each host card from the host agent, any JSON URL or a Shelly meter, with a Shelly panel above the cards",
+  "version": "1.5.0",
+  "description": "Current power draw (W) on each host card from the host agent, any JSON URL or a Shelly meter; Shelly panel, total pill and power graph",
   "min_core_version": "8.3.0",
   "plugin_api_version": 2,
   "author": "Valli-2020",
   "license": "MIT",
-  "capabilities": ["hosts.read", "ui.slots"]
+  "capabilities": ["hosts.read", "ui.frame", "ui.header", "ui.slots"]
 }

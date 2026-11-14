@@ -6,12 +6,16 @@ source (smart plug, Home Assistant), a base load or a different agent port.
 Shelly meters (Gen1 and Gen2+) are read natively: each shows a panel above
 the host cards (power, voltage, current, energy, relay) and, with a host id,
 the badge of that host card.
+A header pill shows the total (mains Shellys, optionally plus the host
+readings) and opens the Power tab, a sandboxed frame with the power graph
+(also shown on the Hosts view).  The history (24 h) is kept in data/.
 A background task polls everything; contributions render the result.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -20,9 +24,14 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from pi_hub.plugins.base import Contribution, Plugin, TaskDef
+from pi_hub.plugins.base import Contribution, FrameDef, Plugin, RouteDef, TaskDef
 
 _MAX_BODY = 64 * 1024
+HISTORY_S = 24 * 3600          # graph history kept
+SAMPLE_GAP_S = 14.5            # at most one sample per ~15 s (24 h ≈ 5760 samples)
+SAVE_EVERY_S = 300             # history written to data/ this often
+RANGES = {"1h": 3600, "6h": 6 * 3600, "24h": 24 * 3600}
+MAX_POINTS = 360               # points per series sent to the graph
 
 
 def extract(data: Any, path: str) -> float:
@@ -43,6 +52,7 @@ def extract(data: Any, path: str) -> float:
 DEFAULTS: dict[str, Any] = {
     "agent_port": 9871, "show_gpu": True, "gpu_min_w": 0.1, "interval": 15, "timeout": 2,
     "stale_polls": 3, "warn_w": 0, "bad_w": 0, "hosts": [], "shellys": [],
+    "show_pill": True, "total_hosts": False,
 }
 
 
@@ -169,13 +179,17 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_NoRedirect)
 
 
+BOLT_SVG = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            'stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>')
+
+
 class Wattage(Plugin):
     name = "wattage"
-    version = "1.4.0"
+    version = "1.5.0"
     description = "Current power draw (W) and GPU power on each host card, Shelly meters above them"
     min_core_version = "8.3.0"
     plugin_api_version = 2
-    capabilities = ["hosts.read", "ui.slots"]
+    capabilities = ["hosts.read", "ui.frame", "ui.header", "ui.slots"]
 
     def load(self, ctx) -> None:
         self.ctx = ctx
@@ -184,6 +198,65 @@ class Wattage(Plugin):
         self._meters: dict[str, dict[str, Any]] = {}  # shelly row key -> reading
         self._shelly_rpc: dict[str, str] = {}         # base url -> status path that worked
         self._last_poll = 0.0
+        self._history: list[dict[str, Any]] = []      # {t, total, hosts, m: {addr: w}}
+        self._last_save = time.time()
+        try:                              # resolved now: at unload the context is already closed
+            self._hist_path: str | None = os.path.join(ctx.data_dir(), "history.json")
+        except Exception:                 # no data dir (old core, test context)
+            self._hist_path = None
+        self._load_history()
+
+    def unload(self) -> None:
+        self._save_history()
+
+    # ── history ──────────────────────────────────────────────────────────
+
+    def _history_path(self) -> str | None:
+        return self._hist_path
+
+    def _load_history(self) -> None:
+        path = self._history_path()
+        if not path:
+            return
+        try:
+            with open(path) as f:
+                rows = json.load(f)
+        except (OSError, ValueError):
+            return
+        cutoff = time.time() - HISTORY_S
+        if isinstance(rows, list):
+            self._history = [r for r in rows if isinstance(r, dict) and _num(r.get("t"), 0) >= cutoff]
+
+    def _save_history(self) -> None:
+        path = self._history_path()
+        if not path:
+            return
+        with self._lock:
+            rows = list(self._history)
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "w") as f:
+                json.dump(rows, f, separators=(",", ":"))
+            os.replace(tmp, path)
+        except OSError:
+            pass
+        self._last_save = time.time()
+
+    def _record(self) -> None:
+        """After a poll: append one sample (total, hosts sum, each Shelly) to the history."""
+        now = time.time()
+        t = self._totals()
+        sample = {"t": round(now), "total": t["total"], "hosts": t["hosts"],
+                  "m": {a: m["w"] for a, m in t["mains"].items()}}
+        with self._lock:
+            if self._history and now - self._history[-1]["t"] < SAMPLE_GAP_S:
+                return
+            self._history.append(sample)
+            cutoff = now - HISTORY_S
+            while self._history and self._history[0]["t"] < cutoff:
+                self._history.pop(0)
+        if now - self._last_save >= SAVE_EVERY_S:
+            self._save_history()
 
     # ── settings ─────────────────────────────────────────────────────────
 
@@ -240,6 +313,14 @@ class Wattage(Plugin):
                   "placeholder": "192.0.2.10"},
                  {"name": "host_id", "label": "Host id", "type": "text"},
              ]},
+            {"name": "show_pill", "label": "Show total in the header", "type": "checkbox", "default": True,
+             "section": "Total",
+             "help": "A pill next to the health chips with the total power; a click opens the Power tab."},
+            {"name": "total_hosts", "label": "Add host readings to the total", "type": "checkbox",
+             "default": False, "section": "Total",
+             "help": "Off: the total is the Shelly meters without a host id (e.g. the one feeding the whole "
+                     "homelab). On: the host badges are added too — leave it off when the hosts already "
+                     "hang behind that Shelly, or they are counted twice."},
             {"name": "show_gpu", "label": "Show GPU badge", "type": "checkbox", "default": True,
              "section": "Badges"},
             {"name": "gpu_min_w", "label": "Hide GPU badge below (W)", "type": "number", "min": 0,
@@ -363,6 +444,7 @@ class Wattage(Plugin):
         if time.time() - self._last_poll >= self._cfg()["interval"]:
             self._last_poll = time.time()
             self.poll_all()
+            self._record()
 
     def get_tasks(self):
         return [TaskDef("poll", self._tick, interval=1.0)]
@@ -372,7 +454,62 @@ class Wattage(Plugin):
     def get_contributions(self):
         return [Contribution("hosts.card.badges", "watts", self.p_watts, poll=15, order=30),
                 Contribution("hosts.card.badges", "gpu", self.p_gpu, poll=15, order=31),
-                Contribution("hosts.top", "shelly", self.p_shelly, poll=15, order=30)]
+                Contribution("hosts.top", "shelly", self.p_shelly, poll=15, order=30),
+                Contribution("header.pill", "total", self.p_pill, poll=15, order=30, opens="power")]
+
+    def get_frames(self):
+        return [FrameDef("power", entry=["power.js"], css=["power.css"],
+                         surfaces=[{"type": "tab", "label": "Power", "icon_svg": BOLT_SVG},
+                                   {"type": "widget", "view": "hosts"}],
+                         height=260)]
+
+    def get_routes(self):
+        return [RouteDef("GET", "/history/{range}", self.r_history)]
+
+    def p_pill(self, session=None):
+        if not self._cfg()["show_pill"]:
+            return None
+        t = self._totals()
+        if t["total"] is None:
+            return None
+        parts = ["%s %.0f W" % (m["name"], m["w"]) for m in t["mains"].values()]
+        if t["with_hosts"] and t["hosts"] is not None:
+            parts.append("%d host%s %.0f W" % (t["host_n"], "" if t["host_n"] == 1 else "s", t["hosts"]))
+        w = t["total"]
+        return {"type": "badge", "text": "⚡ " + (("%.1f" if w < 100 else "%.0f") % w) + " W",
+                "tone": self._tone(w) if self._tone(w) != "info" else "accent",
+                "title": "Total power: " + " + ".join(parts)}
+
+    def r_history(self, params):
+        """Graph data for one range, averaged down to at most MAX_POINTS per series."""
+        span = RANGES.get(str(params.get("range")), RANGES["1h"])
+        cfg = self._cfg()
+        now = time.time()
+        with self._lock:
+            rows = [r for r in self._history if r["t"] >= now - span]
+        mains = {a: r["name"] for a, r in cfg["shellys"].items() if not r["host_id"]}
+        bucket = max(span / MAX_POINTS, SAMPLE_GAP_S)
+        keys = ["total", "hosts"] + ["m:" + a for a in mains]
+        acc: dict[int, dict[str, list[float]]] = {}
+        for r in rows:
+            b = acc.setdefault(int((r["t"] - (now - span)) // bucket), {})
+            for k in keys:
+                v = r["m"].get(k[2:]) if k.startswith("m:") else r.get(k)
+                if v is not None:
+                    b.setdefault(k, []).append(float(v))
+        idx = sorted(acc)
+        t0 = now - span
+        series = {k: [(round(t0 + (i + 0.5) * bucket),
+                       round(sum(acc[i][k]) / len(acc[i][k]), 1) if acc[i].get(k) else None) for i in idx]
+                  for k in keys}
+        out = [{"key": "total", "name": "Total", "points": series["total"]}]
+        if len(mains) > 1 or cfg["total_hosts"]:
+            out += [{"key": "m:" + a, "name": n, "points": series["m:" + a]} for a, n in mains.items()]
+        if any(v is not None for _, v in series["hosts"]):
+            out.append({"key": "hosts", "name": "Hosts (sum)", "points": series["hosts"]})
+        out = [s for s in out if any(v is not None for _, v in s["points"])]
+        return {"range": span, "now": round(now), "with_hosts": bool(cfg["total_hosts"]),
+                "warn_w": cfg["warn_w"], "bad_w": cfg["bad_w"], "series": out}
 
     def _tone(self, w: float) -> str:
         cfg = self._cfg()
@@ -390,15 +527,48 @@ class Wattage(Plugin):
         with self._lock:
             return now, stale, dict(self._data), dict(self._meters)
 
-    def p_watts(self, session=None):
-        now, stale, snap, meters = self._snapshot()
-        cfg = self._cfg()
-        hosts_cfg = cfg["hosts"]
+    def _host_readings(self, now, stale, snap, meters, cfg) -> dict[str, dict[str, Any]]:
+        """Host id -> reading, with Shellys that carry a host id merged in."""
+        snap = dict(snap)
         for addr, row in cfg["shellys"].items():          # a Shelly with a host id is that host's badge
             m = meters.get(addr)
             if row["host_id"] and m:
                 snap[row["host_id"]] = {"w": m["w"], "gpu": None, "ts": m["ts"], "err": m["err"],
                                         "shelly": row["name"]}
+        return snap
+
+    def _host_watts(self, r: dict[str, Any], base: dict[str, float], hid: str) -> float:
+        """The watts a host badge shows (CPU + base load when a base load is set)."""
+        if r.get("cpu_only") and hid in base:
+            return r["w"] + base[hid]
+        return r["w"]
+
+    def _totals(self) -> dict[str, Any]:
+        """Mains Shellys (no host id), the sum of fresh host readings and the pill total."""
+        now, stale, snap, meters = self._snapshot()
+        cfg = self._cfg()
+        base = {hid: max(0.0, _num(r.get("base_w"), 0)) for hid, r in cfg["hosts"].items() if r.get("base_w")}
+        mains = {}
+        for addr, row in cfg["shellys"].items():
+            m = meters.get(addr)
+            if not row["host_id"] and m and m["w"] is not None and now - m["ts"] <= stale:
+                mains[addr] = {"name": row["name"], "w": m["w"]}
+        hosts = {hid: self._host_watts(r, base, hid)
+                 for hid, r in self._host_readings(now, stale, snap, meters, cfg).items()
+                 if r["w"] is not None and now - r["ts"] <= stale}
+        hosts_w = sum(hosts.values()) if hosts else None
+        parts = [m["w"] for m in mains.values()]
+        if cfg["total_hosts"] and hosts_w is not None:
+            parts.append(hosts_w)
+        total = sum(parts) if parts else None
+        return {"total": total, "mains": mains, "hosts": hosts_w, "host_n": len(hosts),
+                "with_hosts": bool(cfg["total_hosts"])}
+
+    def p_watts(self, session=None):
+        now, stale, snap, meters = self._snapshot()
+        cfg = self._cfg()
+        hosts_cfg = cfg["hosts"]
+        snap = self._host_readings(now, stale, snap, meters, cfg)
         base = {hid: max(0.0, _num(r.get("base_w"), 0)) for hid, r in hosts_cfg.items() if r.get("base_w")}
         out = {}
         for hid, r in snap.items():

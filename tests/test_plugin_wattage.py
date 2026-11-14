@@ -151,6 +151,87 @@ def test_shelly_polling_and_panel():
         srv.shutdown()
 
 
+def test_total_pill_toggle_and_history():
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_port
+    base = "127.0.0.1:%d" % port
+    try:
+        p, ctx = make({"agent_port": port})
+        p.poll_all()
+        assert p.p_pill() is None, "no mains Shelly, hosts off: no total"
+        ctx.cfg["total_hosts"] = True
+        pill = p.p_pill()
+        assert pill["text"] == "⚡ 25.6 W" and "2 hosts 26 W" in pill["title"], pill   # 2 agents x 12.8
+        ctx.cfg.update(total_hosts=False, shellys=[{"name": "Homelab", "address": base + "/g2"},
+                                                   {"address": base + "/g1", "host_id": "b"}])
+        p.poll_all()
+        pill = p.p_pill()
+        assert pill["text"] == "⚡ 69.3 W" and pill["title"] == "Total power: Homelab 69 W", pill
+        ctx.cfg["total_hosts"] = True                         # a = agent 12.8, b = Shelly with host id 12.5
+        pill = p.p_pill()
+        assert pill["text"] == "⚡ 94.6 W" and "2 hosts 25 W" in pill["title"], pill
+        ctx.cfg["show_pill"] = False
+        assert p.p_pill() is None
+        ctx.cfg["show_pill"] = True
+        try:
+            from pi_hub.plugins import contrib
+            contrib.validate_node(pill)
+        except ImportError:
+            pass
+
+        p._record()
+        p._record()                                           # within the sample gap: dropped
+        assert len(p._history) == 1 and p._history[0]["total"] == 94.6, p._history
+        assert p._history[0]["m"] == {base + "/g2": 69.3} and p._history[0]["hosts"] == 25.3
+        now = __import__("time").time()
+        p._history[:0] = [{"t": now - 7200, "total": 50.0, "hosts": None, "m": {base + "/g2": 50.0}},
+                          {"t": now - 1800, "total": 60.0, "hosts": 20.0, "m": {base + "/g2": 40.0}}]
+        h = p.r_history({"range": "1h"})
+        names = [x["name"] for x in h["series"]]
+        assert names == ["Total", "Homelab", "Hosts (sum)"], names       # hosts on: mains shown apart
+        tot = [v for _, v in h["series"][0]["points"] if v is not None]
+        assert tot == [60.0, 94.6], tot                       # the 2 h old sample is outside 1h
+        assert len(p.r_history({"range": "24h"})["series"][0]["points"]) == 3
+        assert p.r_history({"range": "bogus"})["range"] == 3600
+        ctx.cfg["total_hosts"] = False
+        assert [x["name"] for x in p.r_history({"range": "1h"})["series"]] == ["Total", "Hosts (sum)"]
+    finally:
+        srv.shutdown()
+
+
+def test_history_persists(tmp=None):
+    import tempfile
+    d = tempfile.mkdtemp()
+    p, ctx = make()
+    ctx.data_dir = lambda: d
+    p.load(ctx)
+    p._history = [{"t": __import__("time").time() - 60, "total": 10.0, "hosts": None, "m": {}},
+                  {"t": 1.0, "total": 1.0, "hosts": None, "m": {}}]
+    ctx.data_dir = lambda: (_ for _ in ()).throw(RuntimeError("context closed"))   # like a real unload
+    p.unload()
+    q, ctx2 = make()
+    ctx2.data_dir = lambda: d
+    q.load(ctx2)
+    assert [r["total"] for r in q._history] == [10.0], q._history     # too old dropped on load
+
+
+def test_frame_and_routes_declared():
+    p, _ = make()
+    f = p.get_frames()[0]
+    assert f.id == "power" and {s["type"] for s in f.surfaces} == {"tab", "widget"}
+    root = os.path.join("pi_hub_plugins", "wattage", "static", "frame")
+    for name in f.entry + f.css:
+        body = open(os.path.join(root, name)).read()
+        assert "</script" not in body and "<!--" not in body
+    pill = [c for c in p.get_contributions() if c.slot == "header.pill"][0]
+    assert pill.opens == "power"
+    assert {"ui.frame", "ui.header"} <= set(p.capabilities)
+    man = json.load(open("pi_hub_plugins/wattage/pihub-plugin.json"))
+    assert man["version"] == p.version and set(man["capabilities"]) == set(p.capabilities)
+    assert json.load(open("pihub-plugin.json")) == man
+
+
 OLD = {"interval": 15, "timeout": 2, "agent_port": 9871, "warn_w": 0, "bad_w": 0,
        "extra": "a http://192.0.2.5/status meters.0.power gpu_w; b http://192.0.2.6/x p",
        "base": "a 15; c 2.5; junk; d x"}

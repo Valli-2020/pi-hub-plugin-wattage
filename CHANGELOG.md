@@ -4,6 +4,25 @@ All notable changes to this plugin are documented here. Releases follow
 the repo-tag = version convention; each GitHub release ships the two
 assets `pihub-plugin.json` and the versioned tarball.
 
+## [1.5.0] - 2026-11-14
+
+### Added
+- **Total pill** in the header (`⚡ 69.3 W`): the Shelly meters without a
+  host id; the tooltip shows the parts. A click opens the Power tab.
+- **Toggle** *Add host readings to the total* (section *Total*, off by
+  default): adds the host badges to the total. Leave it off when the hosts
+  already hang behind the mains Shelly, or they are counted twice. Shellys
+  with a host id count as host readings, not as mains.
+- **Power graph**: a *Power* tab and a widget on the Hosts view, with 1 h,
+  6 h and 24 h ranges, a line per mains Shelly and the hosts sum, the
+  warn/bad limits and a hover readout. The last 24 h are kept in the
+  plugin's `data/` folder and survive a restart.
+- Setting *Show total in the header*.
+
+### Changed
+- New permissions `ui.header` (pill) and `ui.frame` (graph): the admin
+  approves the plugin again after the update.
+
 ## [1.4.0] - 2026-11-14
 
 ### Added
