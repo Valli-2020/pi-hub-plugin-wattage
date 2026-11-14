@@ -4,7 +4,9 @@
 // hub (meter names) is only ever set with textContent, never innerHTML.
 (function () {
   'use strict';
-  var TAB = ph.surface === 'tab';
+  // ph.surface is only set once the dashboard's init message arrives, which
+  // is AFTER this script runs: decide tab vs widget in whenSurface(), not here.
+  var TAB = false;
   var H = 300;                                 // canvas height of the tab chart (CSS px)
   var PAD = { l: 44, r: 10, t: 10, b: 22 };
   var range = '1h', data = null, busy = false, hover = -1;
@@ -32,7 +34,13 @@
     return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
   }
 
-  if (!TAB) { compact(); return; }
+  function whenSurface(cb) {
+    var n = 0;
+    (function check() {
+      if (ph.surface || n++ > 150) cb(ph.surface); else setTimeout(check, 20);   // up to ~3 s
+    })();
+  }
+  whenSurface(function (sf) { TAB = sf !== 'widget'; if (TAB) tab(); else compact(); });
 
   // ── compact widget (Hosts view): one slim row, total over the last hour ──
   function compact() {
@@ -105,7 +113,8 @@
     setInterval(cpoll, 15000);
   }
 
-  // ── layout (Power tab) ───────────────────────────────────────────────────
+  // ── Power tab ────────────────────────────────────────────────────────────
+  function tab() {
   var head = el('div', 'head');
   var title = el('div', 'title');
   title.appendChild(el('span', 'label', 'Power'));
@@ -367,4 +376,5 @@
   draw();
   poll();
   setInterval(poll, 15000);
+  }
 })();

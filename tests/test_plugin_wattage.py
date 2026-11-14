@@ -261,7 +261,7 @@ def test_frame_and_routes_declared():
     f = p.get_frames()[0]
     assert f.id == "power" and {s["type"] for s in f.surfaces} == {"tab", "widget"}
     js = open(os.path.join("pi_hub_plugins", "wattage", "static", "frame", "power.js")).read()
-    assert "if (!TAB) { compact(); return; }" in js            # Hosts widget = slim sparkline row
+    assert "TAB = sf !== 'widget'" in js and "ph.surface === 'tab'" not in js   # surface known only after init
     root = os.path.join("pi_hub_plugins", "wattage", "static", "frame")
     for name in f.entry + f.css:
         body = open(os.path.join(root, name)).read()

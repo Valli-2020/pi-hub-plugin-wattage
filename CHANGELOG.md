@@ -4,6 +4,14 @@ All notable changes to this plugin are documented here. Releases follow
 the repo-tag = version convention; each GitHub release ships the two
 assets `pihub-plugin.json` and the versioned tarball.
 
+## [1.6.1] - 2026-11-14
+
+### Fixed
+- The Power tab showed only the slim Hosts-view row instead of the chart,
+  key figures and tables. The frame read `ph.surface` when its script
+  started, but the dashboard only sets it with the init message that
+  arrives afterwards; the frame now waits for it.
+
 ## [1.6.0] - 2026-11-14
 
 ### Added

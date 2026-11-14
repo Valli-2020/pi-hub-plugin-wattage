@@ -206,7 +206,7 @@ PILL_CSS = (
 
 class Wattage(Plugin):
     name = "wattage"
-    version = "1.6.0"
+    version = "1.6.1"
     description = "Current power draw (W) and GPU power on each host card, Shelly meters above them"
     min_core_version = "8.3.0"
     plugin_api_version = 2
