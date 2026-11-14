@@ -14,6 +14,10 @@ or the small host agent bundled in this repo.
   found on its own — no per-host setup.
 - **GPU badge**: shown when the host reports GPU power (NVIDIA, AMD, or an
   integrated GPU under load).
+- **Shelly meters**: a Shelly plug or relay with power metering (e.g. the
+  one feeding the whole rack) gets its own panel above the host cards —
+  power, voltage, current, energy total, device temperature, relay state.
+  Optionally its reading also becomes one host's badge.
 - **Extra sources**: any other JSON endpoint (metered smart plug, Home
   Assistant) can be added as a row in the *Hosts* setting.
 - **Thresholds**: optional *warn* / *bad* watt limits change the badge
@@ -38,6 +42,7 @@ Hosts are detected automatically; the *Hosts* list is only for exceptions.
 |---|---|---|---|
 | Host agent port | Detection | `9871` | Port the agent answers on; `1` switches detection off |
 | Per-host settings | Hosts | empty | One row per host, see below |
+| Shelly meters | Shelly | empty | One row per Shelly, see below |
 | Show GPU badge | Badges | on | Turn the GPU badge off everywhere |
 | Hide GPU badge below (W) | Badges | `0.1` | Keeps idle integrated GPUs quiet |
 | Warn / Bad above (W) | Badges | `0` | Badge colour limits; `0` = no colour change |
@@ -55,12 +60,21 @@ Columns of a *Per-host settings* row (all optional except the host id):
 | Base load (W) | What the rest of the machine draws on top of the CPU; agent readings then show an estimate |
 | Agent port | Overrides the default agent port for this host |
 
-Examples for a source row (Source URL, Power JSON path):
+Columns of a *Shelly meters* row:
+
+| Column | Meaning |
+|---|---|
+| Name | Panel title, e.g. `Homelab` (defaults to the address) |
+| IP or URL | `192.0.2.10`, `shelly.lan` or `http://192.0.2.10`; Gen1 and Gen2+ are detected |
+| Host id | Optional: also show the reading as this host's badge (wins over a source URL and the agent) |
+
+Shelly support is read-only — the relay is never switched — and needs the
+device's local password (*Restrict login*) to be off.
+
+Examples for a generic source row (Source URL, Power JSON path):
 
 | Source | URL | Path |
 |---|---|---|
-| Shelly Gen1 | `http://<device-ip>/status` | `meters.0.power` |
-| Shelly Gen2 | `http://<device-ip>/rpc/Switch.GetStatus?id=0` | `apower` |
 | Tasmota | `http://<device-ip>/cm?cmnd=Status%2010` | `StatusSNS.ENERGY.Power` |
 
 Upgrading from 1.2: the old *Extra sources* and *Base load* text settings are
@@ -108,7 +122,8 @@ PIHUB_CORE=<pi-hub checkout> python3 tests/test_plugin_wattage.py   # or pytest
 ```
 
 The tests run the plugin against a local stub server (JSON path, redirect
-refusal, GPU badge, thresholds, config migration, live settings).
+refusal, GPU badge, thresholds, config migration, live settings, Shelly
+Gen1/Gen2 parsing and panel).
 
 ## Release assets
 

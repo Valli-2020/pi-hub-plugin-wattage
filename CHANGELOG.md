@@ -4,6 +4,19 @@ All notable changes to this plugin are documented here. Releases follow
 the repo-tag = version convention; each GitHub release ships the two
 assets `pihub-plugin.json` and the versioned tarball.
 
+## [1.4.0] - 2026-11-14
+
+### Added
+- **Shelly meters**, read natively (Gen1 `/status`, Gen2+ `Shelly.GetStatus`;
+  the generation is detected). New *Shelly meters* list in the Configure
+  dialog: name, IP or URL, optional host id.
+- A panel per Shelly above the host cards: power, voltage, current,
+  lifetime energy (kWh), device temperature and relay state. Multi-channel
+  devices (Plus 2PM) are summed; the Pro 3EM uses its total power.
+- With a host id, the Shelly reading is also that host's card badge.
+- Read-only: the plugin never switches a relay. Devices with a password
+  show `HTTP 401` and are not supported yet.
+
 ## [1.3.0] - 2026-11-14
 
 ### Changed

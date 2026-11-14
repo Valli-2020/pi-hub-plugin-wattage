@@ -23,8 +23,24 @@ spec.loader.exec_module(w)
 FAILED = []
 
 
+GEN2 = {"switch:0": {"id": 0, "output": True, "apower": 69.3, "voltage": 226.5, "current": 0.58,
+                    "aenergy": {"total": 2541733.3}, "temperature": {"tC": 28.5}},
+        "sys": {"uptime": 1}, "wifi": {"rssi": -61}}
+GEN1 = {"relays": [{"ison": False}], "meters": [{"power": 12.5, "total": 6000}], "temperature": 41.2}
+
+
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path in ("/g2/rpc/Shelly.GetStatus", "/g1/status"):
+            body = json.dumps(GEN2 if self.path.startswith("/g2") else GEN1).encode()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path.startswith(("/g1/", "/g2/", "/auth/")):
+            self.send_response(401 if self.path.startswith("/auth/") else 404)
+            self.end_headers()
+            return
         if self.path == "/redir":
             self.send_response(302)
             self.send_header("Location", "file:///etc/passwd")
@@ -68,6 +84,71 @@ def test_extract():
             raise AssertionError("accepted %r" % (bad,))
         except (KeyError, IndexError, ValueError):
             pass
+
+
+def test_parse_shelly():
+    r = w.parse_shelly(GEN2)
+    assert r == {"w": 69.3, "wh": 2541733.3, "v": 226.5, "a": 0.58, "temp": 28.5, "on": True}, r
+    r = w.parse_shelly(GEN1)
+    assert r["w"] == 12.5 and r["wh"] == 100.0 and r["on"] is False and r["temp"] == 41.2, r
+    two = {"switch:0": {"apower": 10, "output": False}, "switch:1": {"apower": 5.5, "output": True}}
+    assert w.parse_shelly(two)["w"] == 15.5 and w.parse_shelly(two)["on"] is True
+    em = {"em:0": {"total_act_power": 230.0, "a_voltage": 231.0}, "emdata:0": {"total_act": 1000.0}}
+    assert w.parse_shelly(em)["w"] == 230.0 and w.parse_shelly(em)["wh"] == 1000.0
+    for bad in ({}, {"sys": {}}, [], {"switch:0": {"output": True}}):
+        try:
+            w.parse_shelly(bad)
+            raise AssertionError("accepted %r" % (bad,))
+        except ValueError:
+            pass
+    assert w.shelly_base("192.0.2.5") == "http://192.0.2.5"
+    assert w.shelly_base(" http://shelly.lan:8080/ ") == "http://shelly.lan:8080"
+    for bad in ("", "file:///etc", "ftp://x"):
+        try:
+            w.shelly_base(bad)
+            raise AssertionError("accepted %r" % bad)
+        except ValueError:
+            pass
+
+
+def test_shelly_polling_and_panel():
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = "127.0.0.1:%d" % srv.server_port
+    try:
+        p, ctx = make({"agent_port": 1})
+        assert p.p_shelly() == {"type": "stack", "children": []}
+        ctx.cfg["shellys"] = [{"name": "Homelab", "address": base + "/g2"},
+                              {"address": "http://%s/g1" % base, "host_id": "b"},
+                              {"name": "Locked", "address": base + "/auth"}]
+        p.poll_all()
+        assert p._shelly_rpc["http://%s/g2" % base] == "/rpc/Shelly.GetStatus"
+        assert p._shelly_rpc["http://%s/g1" % base] == "/status"       # Gen1 found via fallback
+        panel = p.p_shelly()
+        homelab, gen1, locked = panel["children"]
+        assert homelab["title"] == "Homelab" and gen1["title"] == "http://%s/g1" % base
+        stats = {c["label"]: c["value"] for c in homelab["children"][1]["children"]}
+        assert stats == {"Power": "69.3", "Voltage": "226.5", "Current": "0.58",
+                         "Energy total": "2541.7", "Device temp": "28"}, stats
+        assert homelab["children"][0]["children"][0]["text"] == "Relay on"
+        assert gen1["children"][0]["children"][0]["state"] == "off"
+        assert "password" in locked["children"][1]["text"], locked
+        out = p.p_watts()                                              # host id -> card badge
+        assert set(out) == {"b"} and out["b"]["text"] == "12.5 W" and "Shelly" in out["b"]["title"], out
+        try:
+            from pi_hub.plugins import contrib
+            contrib.validate_node(panel)
+            contrib.validate_keyed(out)
+        except ImportError:
+            pass
+        ctx.cfg["shellys"] = ctx.cfg["shellys"][:1]
+        p.poll_all()
+        assert set(p._meters) == {base + "/g2"} and p.p_watts() == {}
+        assert p.p_shelly()["title"] == "Homelab"                       # one meter: no wrapper
+        ctx.cfg["warn_w"] = 50
+        assert p.p_shelly()["children"][1]["children"][0]["tone"] == "warn"
+    finally:
+        srv.shutdown()
 
 
 OLD = {"interval": 15, "timeout": 2, "agent_port": 9871, "warn_w": 0, "bad_w": 0,
