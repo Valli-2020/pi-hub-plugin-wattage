@@ -15,7 +15,7 @@ or the small host agent bundled in this repo.
 - **GPU badge**: shown when the host reports GPU power (NVIDIA, AMD, or an
   integrated GPU under load).
 - **Extra sources**: any other JSON endpoint (metered smart plug, Home
-  Assistant) can be added in one setting.
+  Assistant) can be added as a row in the *Hosts* setting.
 - **Thresholds**: optional *warn* / *bad* watt limits change the badge
   colour. A failed or stale reading shows a muted `— W`; the reason is in
   the tooltip.
@@ -31,26 +31,40 @@ or the small host agent bundled in this repo.
 
 ## Configuration
 
-**Settings → Plugins → wattage → Configure.** No host list to fill in.
+**Settings → Plugins → wattage → Configure.** Every setting is in the dialog.
+Hosts are detected automatically; the *Hosts* list is only for exceptions.
 
-| Setting | Meaning |
+| Setting | Section | Default | Meaning |
+|---|---|---|---|
+| Host agent port | Detection | `9871` | Port the agent answers on; `1` switches detection off |
+| Per-host settings | Hosts | empty | One row per host, see below |
+| Show GPU badge | Badges | on | Turn the GPU badge off everywhere |
+| Hide GPU badge below (W) | Badges | `0.1` | Keeps idle integrated GPUs quiet |
+| Warn / Bad above (W) | Badges | `0` | Badge colour limits; `0` = no colour change |
+| Poll interval (s) | Polling | `15` | Applies live |
+| Timeout (s) | Polling | `2` | Per request |
+| Stale after (polls) | Polling | `3` | Older readings show a muted `— W` |
+
+Columns of a *Per-host settings* row (all optional except the host id):
+
+| Column | Meaning |
 |---|---|
-| Host agent port | Port the agent answers on (default `9871`); `1` switches detection off |
-| Base load (W) | What the rest of the machine draws on top of the CPU, per host: `host-id watts`, entries separated by `;` |
-| Extra sources | Other JSON sources: `host-id url json-path [gpu-path]`, entries separated by `;` |
-| Poll interval / Timeout | Seconds (interval applies after a reload) |
-| Warn / Bad above (W) | Badge colour limits; `0` = no colour change |
+| Host id | Id of the host card the row belongs to |
+| Source URL + Power JSON path | Another JSON source for this host (wins over the agent); dotted path, list indices allowed |
+| GPU JSON path | Optional GPU watts path in the same response |
+| Base load (W) | What the rest of the machine draws on top of the CPU; agent readings then show an estimate |
+| Agent port | Overrides the default agent port for this host |
 
-Examples for *Extra sources* (the host id is the id of the card it belongs to):
+Examples for a source row (Source URL, Power JSON path):
 
-| Source | Entry |
-|---|---|
-| Shelly Gen1 | `myhost http://<device-ip>/status meters.0.power` |
-| Shelly Gen2 | `myhost http://<device-ip>/rpc/Switch.GetStatus?id=0 apower` |
-| Tasmota | `myhost http://<device-ip>/cm?cmnd=Status%2010 StatusSNS.ENERGY.Power` |
+| Source | URL | Path |
+|---|---|---|
+| Shelly Gen1 | `http://<device-ip>/status` | `meters.0.power` |
+| Shelly Gen2 | `http://<device-ip>/rpc/Switch.GetStatus?id=0` | `apower` |
+| Tasmota | `http://<device-ip>/cm?cmnd=Status%2010` | `StatusSNS.ENERGY.Power` |
 
-An extra source wins over the agent for the same host. The JSON path is
-dotted, list indices allowed.
+Upgrading from 1.2: the old *Extra sources* and *Base load* text settings are
+converted into rows automatically.
 
 ## Host agent
 
@@ -75,7 +89,7 @@ curl http://<bind-ip>:9871/            # {"package_w": 12.8, "cpu_w": 8.9, "gpu_
 
 - Only `http://` and `https://` URLs are read; redirects are not followed
   and responses are capped at 64 KB.
-- Extra-source URLs are stored in the plugin's `config.json` in plain text,
+- Source URLs are stored in the plugin's `config.json` in plain text,
   so keep tokens out of them.
 - Every host with an IP is probed on the agent port each interval (1–2 s
   timeout, in parallel); hosts without an agent simply show nothing.
@@ -90,11 +104,11 @@ curl http://<bind-ip>:9871/            # {"package_w": 12.8, "cpu_w": 8.9, "gpu_
 ## Development
 
 ```sh
-PYTHONPATH=<pi-hub checkout> python3 tests/test_plugin_wattage.py
+PIHUB_CORE=<pi-hub checkout> python3 tests/test_plugin_wattage.py   # or pytest
 ```
 
 The tests run the plugin against a local stub server (JSON path, redirect
-refusal, GPU badge, thresholds).
+refusal, GPU badge, thresholds, config migration, live settings).
 
 ## Release assets
 

@@ -4,6 +4,21 @@ All notable changes to this plugin are documented here. Releases follow
 the repo-tag = version convention; each GitHub release ships the two
 assets `pihub-plugin.json` and the versioned tarball.
 
+## [1.3.0] - 2026-11-14
+
+### Changed
+- Every setting is now in the Configure dialog, grouped into Detection,
+  Hosts, Badges and Polling. Needs Pi Hub 8.3.0.
+- *Extra sources* and *Base load* (text settings) are replaced by one
+  *Per-host settings* list: host id, source URL, JSON paths, base load and
+  an optional agent port per host. Existing settings are converted
+  automatically on upgrade.
+- The poll interval now applies without a reload; saving settings polls again
+  right away.
+
+### Added
+- Settings: show GPU badge, GPU badge threshold, stale-after polls.
+
 ## [1.2.0] - 2026-10-06
 
 ### Added

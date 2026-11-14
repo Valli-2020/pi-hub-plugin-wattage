@@ -1,9 +1,10 @@
 """wattage — show each host's current power draw on its card.
 
 Hosts that run the bundled wattage-agent are found automatically (it answers
-on a fixed port).  Any other JSON source (smart plug, Home Assistant) can be
-added in the "Extra sources" setting.  A background task polls everything; a
-contribution renders the result as badges on the host cards.
+on a fixed port).  Per-host rows in the "Hosts" setting add another JSON
+source (smart plug, Home Assistant), a base load or a different agent port.
+A background task polls everything; a contribution renders the result as
+badges on the host cards.
 """
 
 from __future__ import annotations
@@ -20,17 +21,6 @@ from typing import Any
 from pi_hub.plugins.base import Contribution, Plugin, TaskDef
 
 _MAX_BODY = 64 * 1024
-_GPU_MIN_W = 0.1        # hide the GPU badge while an integrated GPU idles
-
-
-def parse_extra(text: str) -> dict[str, tuple[str, str, str]]:
-    """``"id url path [gpu-path]; id url path"`` -> {id: (url, path, gpu_path)}."""
-    out = {}
-    for entry in str(text or "").split(";"):
-        parts = entry.split()
-        if len(parts) in (3, 4):
-            out[parts[0]] = (parts[1], parts[2], parts[3] if len(parts) == 4 else "")
-    return out
 
 
 def extract(data: Any, path: str) -> float:
@@ -48,17 +38,40 @@ def extract(data: Any, path: str) -> float:
     return float(cur)
 
 
-def parse_base(text: str) -> dict[str, float]:
-    """``"id 15; id2 22.5"`` -> {id: watts}."""
-    out = {}
-    for entry in str(text or "").split(";"):
+DEFAULTS: dict[str, Any] = {
+    "agent_port": 9871, "show_gpu": True, "gpu_min_w": 0.1, "interval": 15, "timeout": 2,
+    "stale_polls": 3, "warn_w": 0, "bad_w": 0, "hosts": [],
+}
+
+
+def _num(value: Any, default: float) -> float:
+    try:
+        if isinstance(value, bool):
+            return float(default)
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def migrate_hosts(config: dict) -> dict:
+    """Old ``extra`` ("id url path [gpu]; ...") and ``base`` ("id watts; ...") strings -> ``hosts`` rows."""
+    config = dict(config)
+    rows: dict[str, dict[str, Any]] = {}
+    for entry in str(config.pop("extra", "") or "").split(";"):
+        parts = entry.split()
+        if len(parts) in (3, 4):
+            rows.setdefault(parts[0], {"host_id": parts[0]}).update(
+                url=parts[1], path=parts[2], gpu_path=parts[3] if len(parts) == 4 else "")
+    for entry in str(config.pop("base", "") or "").split(";"):
         parts = entry.split()
         if len(parts) == 2:
             try:
-                out[parts[0]] = max(0.0, float(parts[1]))
+                rows.setdefault(parts[0], {"host_id": parts[0]})["base_w"] = max(0.0, float(parts[1]))
             except ValueError:
                 pass
-    return out
+    if rows and not config.get("hosts"):
+        config["hosts"] = list(rows.values())
+    return config
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -71,9 +84,9 @@ _opener = urllib.request.build_opener(_NoRedirect)
 
 class Wattage(Plugin):
     name = "wattage"
-    version = "1.2.0"
+    version = "1.3.0"
     description = "Current power draw (W) and GPU power on each host card"
-    min_core_version = "8.0.0"
+    min_core_version = "8.3.0"
     plugin_api_version = 2
     capabilities = ["hosts.read", "ui.slots"]
 
@@ -81,29 +94,62 @@ class Wattage(Plugin):
         self.ctx = ctx
         self._lock = threading.Lock()
         self._data: dict[str, dict[str, Any]] = {}   # host id -> {w, gpu, ts, err}
-        cfg = ctx.get_config()
-        for k, v in (("interval", 15), ("timeout", 2), ("agent_port", 9871),
-                     ("warn_w", 0), ("bad_w", 0), ("extra", ""), ("base", "")):
-            cfg.setdefault(k, v)
+        self._last_poll = 0.0
+
+    # ── settings ─────────────────────────────────────────────────────────
+
+    def migrate_config(self, old_version: str, config: dict) -> dict:
+        return migrate_hosts(config)
+
+    def on_config_change(self, old: dict, new: dict) -> None:
+        self._last_poll = 0.0          # the next tick polls with the new settings
+
+    def _cfg(self) -> dict[str, Any]:
+        raw = self.ctx.get_config() or {}
+        cfg = {k: raw.get(k, v) for k, v in DEFAULTS.items()}
+        cfg["interval"] = max(1.0, _num(cfg["interval"], 15))
+        cfg["timeout"] = max(0.1, _num(cfg["timeout"], 2))
+        cfg["stale_polls"] = max(1.0, _num(cfg["stale_polls"], 3))
+        cfg["agent_port"] = int(_num(cfg["agent_port"], 9871))
+        for k in ("warn_w", "bad_w", "gpu_min_w"):
+            cfg[k] = _num(cfg[k], DEFAULTS[k])
+        rows = cfg["hosts"] if isinstance(cfg["hosts"], list) else []
+        cfg["hosts"] = {str(r["host_id"]).strip(): r for r in rows
+                        if isinstance(r, dict) and str(r.get("host_id") or "").strip()}
+        return cfg
 
     def get_config_schema(self):
         return [
             {"name": "agent_port", "label": "Host agent port", "type": "number", "min": 1, "max": 65535,
+             "default": 9871, "section": "Detection",
              "help": "Hosts running wattage-agent are detected on this port. Set to 1 to switch detection off."},
-            {"name": "extra", "label": "Extra sources", "type": "text",
-             "placeholder": "host-id http://<ip>/status meters.0.power; host-id2 http://<ip>/x path gpu-path",
-             "help": "Other JSON sources: host id, URL, JSON path and optional GPU path, entries separated by ';'."},
-            {"name": "base", "label": "Base load (W)", "type": "text",
-             "placeholder": "host-id 15; host-id2 22",
-             "help": "Host agents only measure the CPU. Add what the rest of the machine draws "
-                     "(board, disks, fans, PSU losses; measure once with a plug) as 'host-id watts' entries "
-                     "separated by ';'. The badge then shows an estimate of the whole device."},
+            {"name": "hosts", "label": "Per-host settings", "type": "list", "section": "Hosts", "max_items": 50,
+             "help": "Optional. Host id = id of the host card. A URL adds a JSON source (wins over the agent); "
+                     "base load is added to CPU-only agent readings; agent port overrides the default.",
+             "fields": [
+                 {"name": "host_id", "label": "Host id", "type": "text", "required": True},
+                 {"name": "url", "label": "Source URL", "type": "url"},
+                 {"name": "path", "label": "Power JSON path", "type": "text", "placeholder": "meters.0.power"},
+                 {"name": "gpu_path", "label": "GPU JSON path", "type": "text"},
+                 {"name": "base_w", "label": "Base load (W)", "type": "number", "min": 0, "max": 100000},
+                 {"name": "agent_port", "label": "Agent port", "type": "number", "min": 0, "max": 65535},
+             ]},
+            {"name": "show_gpu", "label": "Show GPU badge", "type": "checkbox", "default": True,
+             "section": "Badges"},
+            {"name": "gpu_min_w", "label": "Hide GPU badge below (W)", "type": "number", "min": 0,
+             "default": 0.1, "section": "Badges",
+             "help": "Keeps idle integrated GPUs quiet."},
+            {"name": "warn_w", "label": "Warn above (W)", "type": "number", "min": 0, "default": 0,
+             "section": "Badges", "help": "0 = no colour change."},
+            {"name": "bad_w", "label": "Bad above (W)", "type": "number", "min": 0, "default": 0,
+             "section": "Badges", "help": "0 = no colour change."},
             {"name": "interval", "label": "Poll interval (s)", "type": "number", "min": 5, "max": 3600,
-             "help": "Applies after the plugin is reloaded."},
-            {"name": "timeout", "label": "Timeout (s)", "type": "number", "min": 0.5, "max": 10},
-            {"name": "warn_w", "label": "Warn above (W)", "type": "number", "min": 0,
-             "help": "0 = no colour change."},
-            {"name": "bad_w", "label": "Bad above (W)", "type": "number", "min": 0},
+             "default": 15, "section": "Polling"},
+            {"name": "timeout", "label": "Timeout (s)", "type": "number", "min": 0.5, "max": 10,
+             "default": 2, "section": "Polling"},
+            {"name": "stale_polls", "label": "Stale after (polls)", "type": "number", "min": 1, "max": 20,
+             "default": 3, "section": "Polling",
+             "help": "A reading older than this many poll intervals shows as a muted '— W'."},
         ]
 
     # ── polling ──────────────────────────────────────────────────────────
@@ -141,14 +187,19 @@ class Wattage(Plugin):
             self._data[host_id] = res
 
     def poll_all(self) -> None:
-        cfg = self.ctx.get_config()
-        extra = parse_extra(cfg.get("extra"))
-        jobs = [(hid, url, path, gpu, False) for hid, (url, path, gpu) in extra.items()]
-        port = int(cfg.get("agent_port") or 0)
-        hosts = self.ctx.get_hosts()
-        if port > 1:
-            jobs += [(h["id"], "http://%s:%d/" % (h["ip"], port), "package_w", "gpu_w", True)
-                     for h in hosts if h.get("ip") and h["id"] not in extra]
+        cfg = self._cfg()
+        hosts_cfg = cfg["hosts"]
+        jobs = [(hid, r["url"], str(r.get("path") or ""), str(r.get("gpu_path") or ""), False)
+                for hid, r in hosts_cfg.items() if r.get("url") and r.get("path")]
+        extra = {j[0] for j in jobs}
+        default_port = cfg["agent_port"]
+        for h in self.ctx.get_hosts():
+            hid = h.get("id")
+            if not hid or not h.get("ip") or hid in extra:
+                continue
+            port = int(_num(hosts_cfg.get(hid, {}).get("agent_port"), 0)) or default_port
+            if port > 1:
+                jobs.append((hid, "http://%s:%d/" % (h["ip"], port), "package_w", "gpu_w", True))
         known = {j[0] for j in jobs}
         with self._lock:
             for hid in list(self._data):
@@ -156,13 +207,18 @@ class Wattage(Plugin):
                     del self._data[hid]
         if not jobs:
             return
-        timeout = float(cfg["timeout"])
         with ThreadPoolExecutor(max_workers=min(8, len(jobs))) as ex:
             for hid, url, path, gpu, auto in jobs:
-                ex.submit(self._poll_one, hid, url, path, gpu, timeout, auto)
+                ex.submit(self._poll_one, hid, url, path, gpu, cfg["timeout"], auto)
+
+    def _tick(self) -> None:
+        """Runs every second; polls when the (live) interval has passed."""
+        if time.time() - self._last_poll >= self._cfg()["interval"]:
+            self._last_poll = time.time()
+            self.poll_all()
 
     def get_tasks(self):
-        return [TaskDef("poll", self.poll_all, interval=float(self.ctx.get_config()["interval"]))]
+        return [TaskDef("poll", self._tick, interval=1.0)]
 
     # ── UI ───────────────────────────────────────────────────────────────
 
@@ -171,8 +227,8 @@ class Wattage(Plugin):
                 Contribution("hosts.card.badges", "gpu", self.p_gpu, poll=15, order=31)]
 
     def _tone(self, w: float) -> str:
-        cfg = self.ctx.get_config()
-        bad, warn = float(cfg["bad_w"] or 0), float(cfg["warn_w"] or 0)
+        cfg = self._cfg()
+        bad, warn = cfg["bad_w"], cfg["warn_w"]
         if bad and w >= bad:
             return "bad"
         if warn and w >= warn:
@@ -180,14 +236,16 @@ class Wattage(Plugin):
         return "info"
 
     def _snapshot(self):
-        stale = 3 * float(self.ctx.get_config()["interval"])
+        cfg = self._cfg()
+        stale = cfg["stale_polls"] * cfg["interval"]
         now = time.time()
         with self._lock:
             return now, stale, dict(self._data)
 
     def p_watts(self, session=None):
         now, stale, snap = self._snapshot()
-        base = parse_base(self.ctx.get_config().get("base"))
+        hosts_cfg = self._cfg()["hosts"]
+        base = {hid: max(0.0, _num(r.get("base_w"), 0)) for hid, r in hosts_cfg.items() if r.get("base_w")}
         out = {}
         for hid, r in snap.items():
             age = now - r["ts"]
@@ -213,7 +271,11 @@ class Wattage(Plugin):
 
     def p_gpu(self, session=None):
         now, stale, snap = self._snapshot()
+        cfg = self._cfg()
+        if not cfg["show_gpu"]:
+            return {}
+        gpu_min = cfg["gpu_min_w"]
         return {hid: {"type": "badge", "text": "GPU %.1f W" % r["gpu"], "tone": "info",
                       "title": "GPU power draw, updated %d s ago" % (now - r["ts"])}
                 for hid, r in snap.items()
-                if r["w"] is not None and r["gpu"] is not None and r["gpu"] >= _GPU_MIN_W and now - r["ts"] <= stale}
+                if r["w"] is not None and r["gpu"] is not None and r["gpu"] >= gpu_min and now - r["ts"] <= stale}
