@@ -100,7 +100,7 @@ def test_schema_valid_and_defaults():
     except ImportError:
         print("skip: core contrib not importable")
         return
-    if "list" not in getattr(contrib, "FIELD_TYPES", ()):
+    if "list" not in getattr(contrib, "CONFIG_FIELD_TYPES", getattr(contrib, "FIELD_TYPES", ())):
         print("skip: core contrib lacks 'list' in FIELD_TYPES (needs 8.3.0)")
         return
     out = contrib.validate_config_schema(schema)
